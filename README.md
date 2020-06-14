@@ -1,3 +1,6 @@
+This repository is clone from https://github.com/antirez/redis.
+I create this repository for personal learning.
+
 This README is just a fast *quick start* document. You can find more detailed documentation at [redis.io](https://redis.io).
 
 What is Redis?
