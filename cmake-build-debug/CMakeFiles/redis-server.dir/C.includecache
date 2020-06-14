@@ -1,0 +1,26 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/Users/wodediannao/CLionProjects/redis/src/crc64.h
+stdint.h
+-
+
+/Users/wodediannao/CLionProjects/redis/src/release.c
+string.h
+-
+release.h
+/Users/wodediannao/CLionProjects/redis/src/release.h
+version.h
+/Users/wodediannao/CLionProjects/redis/src/version.h
+crc64.h
+/Users/wodediannao/CLionProjects/redis/src/crc64.h
+
+/Users/wodediannao/CLionProjects/redis/src/release.h
+
+/Users/wodediannao/CLionProjects/redis/src/version.h
+
