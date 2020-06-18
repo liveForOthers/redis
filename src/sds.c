@@ -208,7 +208,9 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
     char type, oldtype = s[-1] & SDS_TYPE_MASK;
     int hdrlen;
 
-    /* Return ASAP if there is enough space left. */
+    /* Return ASAP if there is enough space left.
+     * 如剩余字符长度 不小于 新增长度字符长度  返回原sds地址
+     * */
     if (avail >= addlen) return s;
 
     len = sdslen(s);

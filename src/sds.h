@@ -28,6 +28,23 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * 优势:
+ * 1 O(1)获取字符串长度，原生C语言字符串需要便利全串获取长度
+ * 2 避免out of range exception
+ *   自动扩容或者进行sds类型转换
+ * 3 减少修改字符串时内存分配次数
+ *   3.1 修改字符串适，C语言需要内存重新分配
+ *   3.2 sds 通过空间预分配 以及 惰性空间释放 减少内存分配次数  A：在尽量少内存浪费情况下 减少内存重分配的次数  B：提高响应速度
+ *      3.2.1 空间预分配：优化字符串变长
+ *            如修改后len小于1MB, 分配和修改后len同样大小的多余空间
+ *            如修改后len大于等于1MB，分配1MB多余空间
+ *      3.2.2 惰性空间释放：优化字符串缩短
+ *            当字符串变短时， 不进行内存重分配回收多余空间，而是将多余长度记录在free属性中，待后续使用。
+ *   3.3 二进制安全
+ *       C语言字符串以空字符作为结束符，如字符串中包含空字符则出现截断。
+ *       sds使用len标识字符串到哪里结束，支持任意字符串
+ *   3.4 兼容C字符串 以空字符结尾，可重用部分方法
  */
 
 #ifndef __SDS_H
@@ -43,16 +60,22 @@ const char *SDS_NOINIT;
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
- * However is here to document the layout of type 5 SDS strings. */
+ * However is here to document the layout of type 5 SDS strings.
+ * 实际上仅key在使用 但是template没有用到
+ * */
 struct __attribute__ ((__packed__)) sdshdr5 {
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
+
+/*
+ * 使用 '__attribute__ ((__packed__))' 修饰结构体，禁止字节对齐，减少内存消耗
+ */
 struct __attribute__ ((__packed__)) sdshdr8 {
-    uint8_t len; /* used */
-    uint8_t alloc; /* excluding the header and null terminator */
-    unsigned char flags; /* 3 lsb of type, 5 unused bits */
-    char buf[];
+    uint8_t len; /* used 已使用的长度 */
+    uint8_t alloc; /* excluding the header and null terminator 除了头尾，已分配的总长度 */
+    unsigned char flags; /* 3 lsb of type, 5 unused bits  3bit来标明类型 */
+    char buf[]; /* 柔性数组，以'\0'结尾 */
 };
 struct __attribute__ ((__packed__)) sdshdr16 {
     uint16_t len; /* used */
@@ -68,20 +91,26 @@ struct __attribute__ ((__packed__)) sdshdr32 {
 };
 struct __attribute__ ((__packed__)) sdshdr64 {
     uint64_t len; /* used */ // 数组长度
-    uint64_t alloc; /* excluding the header and null terminator */ // 数组总容量。其中 len <= alloc 。
+    // 数组总容量。其中 len <= alloc 。不包含末尾结束符 遵循C语言规则可重用部分代码。
+    uint64_t alloc; /* excluding the header and null terminator */
     unsigned char flags; /* 3 lsb of type, 5 unused bits */ // TODO 芋艿，貌似标识是哪种类型的 sds
     char buf[]; // 数组内容
 };
 
+// 宏定义，类似Enum 提高可读性
 #define SDS_TYPE_5  0
 #define SDS_TYPE_8  1
 #define SDS_TYPE_16 2
 #define SDS_TYPE_32 3
 #define SDS_TYPE_64 4
 #define SDS_TYPE_MASK 7
+// flags 低3位存储sds的类型
 #define SDS_TYPE_BITS 3
+// 过去指向sdshdr的指针，赋值给sh
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+// 获取指向sdshdr结构体的指针
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
+// 获取sdshrd5 字符串长度，也就是flag中高5位存储的值
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
 static inline size_t sdslen(const sds s) {
@@ -100,7 +129,9 @@ static inline size_t sdslen(const sds s) {
     }
     return 0;
 }
-
+/*
+ * 返回可用的字符长度
+ * */
 static inline size_t sdsavail(const sds s) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
