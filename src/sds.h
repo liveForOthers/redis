@@ -34,7 +34,7 @@
  * 2 避免out of range exception
  *   自动扩容或者进行sds类型转换
  * 3 减少修改字符串时内存分配次数
- *   3.1 修改字符串适，C语言需要内存重新分配
+ *   3.1 修改字符串，C语言需要内存重新分配
  *   3.2 sds 通过空间预分配 以及 惰性空间释放 减少内存分配次数  A：在尽量少内存浪费情况下 减少内存重分配的次数  B：提高响应速度
  *      3.2.1 空间预分配：优化字符串变长
  *            如修改后len小于1MB, 分配和修改后len同样大小的多余空间
@@ -45,6 +45,8 @@
  *       C语言字符串以空字符作为结束符，如字符串中包含空字符则出现截断。
  *       sds使用len标识字符串到哪里结束，支持任意字符串
  *   3.4 兼容C字符串 以空字符结尾，可重用部分方法
+ *   4 提供了5种结构体，根据字符串长短不同使用不同的结构体定义存储，节约内存(比原生有多长分配多长要消耗内存，但兼顾了业务场景，性能与内存消耗)。
+ *   5 对象属性内存连续性能更优。 通过字符数组首地址可以方便找到header地址
  */
 
 #ifndef __SDS_H
@@ -57,11 +59,12 @@ const char *SDS_NOINIT;
 #include <stdarg.h>
 #include <stdint.h>
 
+// 指向字符串开始位置的指针
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings.
- * 实际上仅key在使用 但是template没有用到
+ * 实际上仅key在使用，由于无alloc 不给分配冗余空间  仅适用于不会变化的短字符串如 key
  * */
 struct __attribute__ ((__packed__)) sdshdr5 {
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
@@ -93,7 +96,9 @@ struct __attribute__ ((__packed__)) sdshdr64 {
     uint64_t len; /* used */ // 数组长度
     // 数组总容量。其中 len <= alloc 。不包含末尾结束符 遵循C语言规则可重用部分代码。
     uint64_t alloc; /* excluding the header and null terminator */
-    unsigned char flags; /* 3 lsb of type, 5 unused bits */ // TODO 芋艿，貌似标识是哪种类型的 sds
+    unsigned char flags; /* 3 lsb of type, 5 unused bits */
+    // C语言柔性数组 仅可以定义在结构体最后一个属性， 指明字符数组在结构体中便宜的位置
+    // 为header分配内存时 不占用空间
     char buf[]; // 数组内容
 };
 
@@ -106,15 +111,17 @@ struct __attribute__ ((__packed__)) sdshdr64 {
 #define SDS_TYPE_MASK 7
 // flags 低3位存储sds的类型
 #define SDS_TYPE_BITS 3
-// 过去指向sdshdr的指针，赋值给sh
+// 返回结构体的头地址
 #define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
-// 获取指向sdshdr结构体的指针
+// 用于返回sds header的地址 其中T 为 该s的类型位数
+// sizeof(struct sdshdr##T)) 得到的是不包含buf的字节数目
 #define SDS_HDR(T,s) ((struct sdshdr##T *)((s)-(sizeof(struct sdshdr##T))))
 // 获取sdshrd5 字符串长度，也就是flag中高5位存储的值
 #define SDS_TYPE_5_LEN(f) ((f)>>SDS_TYPE_BITS)
 
 static inline size_t sdslen(const sds s) {
     unsigned char flags = s[-1];
+    // 位操作获取当前sds的类型
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
             return SDS_TYPE_5_LEN(flags);
@@ -133,6 +140,7 @@ static inline size_t sdslen(const sds s) {
  * 返回可用的字符长度
  * */
 static inline size_t sdsavail(const sds s) {
+    // 内存连续 字符指针起始位置 向低地址便宜1字节位置 就是flag
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
         case SDS_TYPE_5: {
