@@ -2236,6 +2236,7 @@ void initServerConfig(void) {
     server.hz = server.config_hz = CONFIG_DEFAULT_HZ;
     server.dynamic_hz = CONFIG_DEFAULT_DYNAMIC_HZ;
     server.arch_bits = (sizeof(long) == 8) ? 64 : 32;
+    // 服务端暴露的端口号
     server.port = CONFIG_DEFAULT_SERVER_PORT;
     server.tcp_backlog = CONFIG_DEFAULT_TCP_BACKLOG;
     server.bindaddr_count = 0;
@@ -2245,9 +2246,13 @@ void initServerConfig(void) {
     server.sofd = -1;
     server.protected_mode = CONFIG_DEFAULT_PROTECTED_MODE;
     server.gopher_enabled = CONFIG_DEFAULT_GOPHER_ENABLED;
+    // 当前server数据库数目
     server.dbnum = CONFIG_DEFAULT_DBNUM;
+    // 日志等级 默认info级别
     server.verbosity = CONFIG_DEFAULT_VERBOSITY;
+    // 客户端多久无请求断开与客户端的连接  5.0版本超时时间是用不断开
     server.maxidletime = CONFIG_DEFAULT_CLIENT_TIMEOUT;
+    // tcp 连接保活时间 与上一个参数差别？
     server.tcpkeepalive = CONFIG_DEFAULT_TCP_KEEPALIVE;
     server.active_expire_enabled = 1;
     server.active_defrag_enabled = CONFIG_DEFAULT_ACTIVE_DEFRAG;
@@ -2268,6 +2273,7 @@ void initServerConfig(void) {
     server.daemonize = CONFIG_DEFAULT_DAEMONIZE;
     server.supervised = 0;
     server.supervised_mode = SUPERVISED_NONE;
+    // Aof默认关闭  如果redis仅当做缓存使用 且qps高 不建议开启AOF  吞吐量回变差
     server.aof_state = AOF_OFF;
     server.aof_fsync = CONFIG_DEFAULT_AOF_FSYNC;
     server.aof_no_fsync_on_rewrite = CONFIG_DEFAULT_AOF_NO_FSYNC_ON_REWRITE;
@@ -2289,7 +2295,9 @@ void initServerConfig(void) {
     server.aof_load_truncated = CONFIG_DEFAULT_AOF_LOAD_TRUNCATED;
     server.aof_use_rdb_preamble = CONFIG_DEFAULT_AOF_USE_RDB_PREAMBLE;
     server.pidfile = NULL;
+    // rdb 文件名 rdb 是redis默认开启的隔一段时间生成一次快照的持久化方式 容易丢较长时间数据，仅做缓存无所谓（全量兜底校验更新）
     server.rdb_filename = zstrdup(CONFIG_DEFAULT_RDB_FILENAME);
+    // aof 文件名 aof 是默认关闭的 增量同步持久化方式  丢更少数据  性能影响大  文件可能非常大 结合压缩算法使用（做缓存且性能要求高不要开启）
     server.aof_filename = zstrdup(CONFIG_DEFAULT_AOF_FILENAME);
     server.acl_filename = zstrdup(CONFIG_DEFAULT_ACL_FILENAME);
     server.rdb_compression = CONFIG_DEFAULT_RDB_COMPRESSION;
@@ -2298,6 +2306,7 @@ void initServerConfig(void) {
     server.activerehashing = CONFIG_DEFAULT_ACTIVE_REHASHING;
     server.active_defrag_running = 0;
     server.notify_keyspace_events = 0;
+    // 单机最大客户端连接数目
     server.maxclients = CONFIG_DEFAULT_MAX_CLIENTS;
     server.blocked_clients = 0;
     memset(server.blocked_clients_by_type,0,
@@ -2343,6 +2352,7 @@ void initServerConfig(void) {
     server.lruclock = getLRUClock();
     resetServerSaveParams();
 
+    // rdb 持久化策略(调试时 频率调高便于触发)  一小时内有一次改变、5分钟内有100次改变、1分钟内有10000次就执行持久化
     appendServerSaveParams(60*60,1);  /* save after 1 hour and 1 change */
     appendServerSaveParams(300,100);  /* save after 5 minutes and 100 changes */
     appendServerSaveParams(60,10000); /* save after 1 minute and 10000 changes */
@@ -4797,6 +4807,7 @@ int main(int argc, char **argv) {
     getRandomHexChars(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed((uint8_t*)hashseed);
     server.sentinel_mode = checkForSentinelMode(argc,argv);
+    // 设置服务器的初始化配置
     initServerConfig();
     ACLInit(); /* The ACL subsystem must be initialized ASAP because the
                   basic networking code and client creation depends on it. */
