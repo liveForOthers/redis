@@ -199,6 +199,7 @@ void appendServerSaveParams(time_t seconds, int changes) {
 }
 
 void resetServerSaveParams(void) {
+    // 释放内存
     zfree(server.saveparams);
     server.saveparams = NULL;
     server.saveparamslen = 0;

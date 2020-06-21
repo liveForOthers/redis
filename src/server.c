@@ -2350,13 +2350,15 @@ void initServerConfig(void) {
     server.io_threads_do_reads = CONFIG_DEFAULT_IO_THREADS_DO_READS;
 
     server.lruclock = getLRUClock();
+    // 释放原 server.saveparams 参数
     resetServerSaveParams();
 
-    // rdb 持久化策略(调试时 频率调高便于触发)  一小时内有一次改变、5分钟内有100次改变、1分钟内有10000次就执行持久化
+    // 设置新的 server.saveparams 参数。 rdb 持久化策略(调试时 频率调高便于触发)  一小时内有一次改变、5分钟内有100次改变、1分钟内有10000次就执行持久化
     appendServerSaveParams(60*60,1);  /* save after 1 hour and 1 change */
     appendServerSaveParams(300,100);  /* save after 5 minutes and 100 changes */
     appendServerSaveParams(60,10000); /* save after 1 minute and 10000 changes */
 
+    // 主从相关配置
     /* Replication related */
     server.masterauth = NULL;
     server.masterhost = NULL;
@@ -2364,6 +2366,7 @@ void initServerConfig(void) {
     server.master = NULL;
     server.cached_master = NULL;
     server.master_initial_offset = -1;
+    // 默认无从节点
     server.repl_state = REPL_STATE_NONE;
     server.repl_transfer_tmpfile = NULL;
     server.repl_transfer_fd = -1;
