@@ -2739,9 +2739,11 @@ void resetServerStats(void) {
 
 void initServer(void) {
     int j;
-
+    // signal： linux 信号量
+    // ignore the sign of SIGHUP and SIGPIPE
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
+    // 设置redis自定义的信号 对应的action 替换linux原生信号 通过调用linux暴露的接口实现signal.h
     setupSignalHandlers();
 
     if (server.syslog_enabled) {
@@ -2752,6 +2754,7 @@ void initServer(void) {
     server.hz = server.config_hz;
     server.pid = getpid();
     server.current_client = NULL;
+    // 各个属性双向链表初始化
     server.clients = listCreate();
     server.clients_index = raxNew();
     server.clients_to_close = listCreate();
@@ -2767,8 +2770,9 @@ void initServer(void) {
     server.clients_paused = 0;
     server.system_memory_size = zmalloc_get_memory_size();
 
-    createSharedObjects();
+    createSharedObjects(); // 共享对象初始化 保存在share中
     adjustOpenFilesLimit();
+    // 初始化事件循环队列  用来处理用户连接
     server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
@@ -2776,6 +2780,7 @@ void initServer(void) {
             strerror(errno));
         exit(1);
     }
+    // redis db 初始化
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
     /* Open the TCP listening socket for the user commands. */
@@ -2787,7 +2792,7 @@ void initServer(void) {
     if (server.unixsocket != NULL) {
         unlink(server.unixsocket); /* don't care if this fails */
         server.sofd = anetUnixServer(server.neterr,server.unixsocket,
-            server.unixsocketperm, server.tcp_backlog);
+            server.unixsocketperm, server.tcp_backlog); // 初始化端口
         if (server.sofd == ANET_ERR) {
             serverLog(LL_WARNING, "Opening Unix socket: %s", server.neterr);
             exit(1);
@@ -2802,10 +2807,11 @@ void initServer(void) {
     }
 
     /* Create the Redis databases, and initialize other internal state. */
+    // 初始化数据库
     for (j = 0; j < server.dbnum; j++) {
-        server.db[j].dict = dictCreate(&dbDictType,NULL);
-        server.db[j].expires = dictCreate(&keyptrDictType,NULL);
-        server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL);
+        server.db[j].dict = dictCreate(&dbDictType,NULL); // map
+        server.db[j].expires = dictCreate(&keyptrDictType,NULL); // 过期时间
+        server.db[j].blocking_keys = dictCreate(&keylistDictType,NULL); // 等数据时 将key放入blocking_keys
         server.db[j].ready_keys = dictCreate(&objectKeyPointerValueDictType,NULL);
         server.db[j].watched_keys = dictCreate(&keylistDictType,NULL);
         server.db[j].id = j;
@@ -2813,11 +2819,12 @@ void initServer(void) {
         server.db[j].defrag_later = listCreate();
     }
     evictionPoolAlloc(); /* Initialize the LRU keys pool. */
+    // 初始化消息队列
     server.pubsub_channels = dictCreate(&keylistDictType,NULL);
     server.pubsub_patterns = listCreate();
     listSetFreeMethod(server.pubsub_patterns,freePubsubPattern);
     listSetMatchMethod(server.pubsub_patterns,listMatchPubsubPattern);
-    server.cronloops = 0;
+    server.cronloops = 0; // 定时循环事件间隔  0表示持续扫描
     server.rdb_child_pid = -1;
     server.aof_child_pid = -1;
     server.rdb_child_type = RDB_CHILD_TYPE_NONE;
@@ -2826,7 +2833,9 @@ void initServer(void) {
     server.child_info_pipe[1] = -1;
     server.child_info_data.magic = 0;
     aofRewriteBufferReset();
+    // aof 缓冲区  默认为空串
     server.aof_buf = sdsempty();
+    // 当前时间
     server.lastsave = time(NULL); /* At startup we consider the DB saved. */
     server.lastbgsave_try = 0;    /* At startup we never tried to BGSAVE. */
     server.rdb_save_time_last = -1;
@@ -2851,13 +2860,16 @@ void initServer(void) {
     /* Create the timer callback, this is our way to process many background
      * operations incrementally, like clients timeout, eviction of unaccessed
      * expired keys and so forth. */
+    // 创建时间回调器 并存储在server.el中 执行后台增量操作 如客户端超时，删除过期key
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
+        // 创建失败直接结束
         serverPanic("Can't create event loop timers.");
         exit(1);
     }
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
+    // 创建接受连接的事件循环处理器  将acceptTcpHandler 注册到ipfd中  用于处理对应事件发生时的回调
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
             acceptTcpHandler,NULL) == AE_ERR)
@@ -2880,6 +2892,7 @@ void initServer(void) {
     }
 
     /* Open the AOF file if needed. */
+    // AOF 初始化
     if (server.aof_state == AOF_ON) {
         server.aof_fd = open(server.aof_filename,
                                O_WRONLY|O_APPEND|O_CREAT,0644);
@@ -2899,7 +2912,7 @@ void initServer(void) {
         server.maxmemory = 3072LL*(1024*1024); /* 3 GB */
         server.maxmemory_policy = MAXMEMORY_NO_EVICTION;
     }
-
+    // 集群初始化
     if (server.cluster_enabled) clusterInit();
     replicationScriptCacheInit();
     scriptingInit(1);
@@ -4466,7 +4479,7 @@ void createPidFile(void) {
 
 void daemonize(void) {
     int fd;
-
+    // 如fork失败 说明父进程存在 直接退出
     if (fork() != 0) exit(0); /* parent exits */
     setsid(); /* create a new session */
 
@@ -4826,6 +4839,7 @@ int main(int argc, char **argv) {
     /* We need to init sentinel right now as parsing the configuration file
      * in sentinel mode will have the effect of populating the sentinel
      * data structures with master nodes to monitor. */
+    // 如果当前节点是哨兵  执行哨兵配置初始化
     if (server.sentinel_mode) {
         initSentinelConfig();
         initSentinel();
@@ -4845,6 +4859,7 @@ int main(int argc, char **argv) {
         char *configfile = NULL;
 
         /* Handle special options --help and --version */
+        // 控制台打印一些信息
         if (strcmp(argv[1], "-v") == 0 ||
             strcmp(argv[1], "--version") == 0) version();
         if (strcmp(argv[1], "--help") == 0 ||
@@ -4861,6 +4876,7 @@ int main(int argc, char **argv) {
         }
 
         /* First argument is the config file name? */
+        // 第一个参数指定的是配置文件的路径  替换配置
         if (argv[j][0] != '-' || argv[j][1] != '-') {
             configfile = argv[j];
             server.configfile = getAbsolutePath(configfile);
@@ -4901,6 +4917,7 @@ int main(int argc, char **argv) {
             exit(1);
         }
         resetServerSaveParams();
+        // 执行配置替换
         loadServerConfig(configfile,options);
         sdsfree(options);
     }
@@ -4959,10 +4976,12 @@ int main(int argc, char **argv) {
     if (server.maxmemory > 0 && server.maxmemory < 1024*1024) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
-
+    // 无客户端执行睡眠前的动作
     aeSetBeforeSleepProc(server.el,beforeSleep);
     aeSetAfterSleepProc(server.el,afterSleep);
+    // 死循环执行
     aeMain(server.el);
+    // 执行结束  删除事件循环
     aeDeleteEventLoop(server.el);
     return 0;
 }
