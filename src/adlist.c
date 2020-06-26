@@ -41,7 +41,7 @@
 list *listCreate(void)
 {
     struct list *list;
-
+    // 给新链表分配内存空间 如失败返回null
     if ((list = zmalloc(sizeof(*list))) == NULL)
         return NULL;
     list->head = list->tail = NULL;
@@ -81,6 +81,11 @@ void listRelease(list *list)
 
 /* Add a new node to the list, to head, containing the specified 'value'
  * pointer as value.
+ * 分配内存空间
+ * 新节点属性赋值
+ * 链表为空链表：链表头尾都指向新节点
+ * 链表为非空链表：1 新节点next指向head, 2 head prev指向新节点 3 head指向新节点
+ * len++
  *
  * On error, NULL is returned and no operation is performed (i.e. the
  * list remains unaltered).

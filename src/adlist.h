@@ -35,6 +35,7 @@
 
 /**
  * 链表节点结构体
+ * typedef 作用是使用listNode 替换 struct listNode  C语言语法
  */
 typedef struct listNode {
     struct listNode *prev;
@@ -43,8 +44,8 @@ typedef struct listNode {
 } listNode;
 
 typedef struct listIter {
-    listNode *next;
-    int direction;
+    listNode *next;  // 当前节点
+    int direction; // 迭代方向
 } listIter;
 
 /**
@@ -75,7 +76,7 @@ typedef struct list {
 #define listGetFree(l) ((l)->free)
 #define listGetMatchMethod(l) ((l)->match)
 
-/* Prototypes */
+/* Prototypes todo 简略看下其他增删改查方法 */
 list *listCreate(void);
 void listRelease(list *list);
 void listEmpty(list *list);
