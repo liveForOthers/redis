@@ -1053,6 +1053,7 @@ struct clusterState;
 #define CHILD_INFO_TYPE_RDB 0
 #define CHILD_INFO_TYPE_AOF 1
 
+// 全局服务状态数据结构
 struct redisServer {
     /* General */
     pid_t pid;                  /* Main process pid. */
