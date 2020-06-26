@@ -346,27 +346,32 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * (that may be registered by time event callbacks just processed).
  * Without special flags the function sleeps until some file event
  * fires, or when the next time event occurs (if any).
+ * 执行每一个待处理的时间事件，之后处理每一个文件事件(这些事件可能是被时间时间注册并在进程中回调
+ * 如果没有特殊的flags，将会sleep知道文件时间被触发 或者 当下一个时间时间出现
  *
  * If flags is 0, the function does nothing and returns.
- * if flags has AE_ALL_EVENTS set, all the kind of events are processed.
+ * if flags has AE_ALL_EVENTS set, all the kind of events are processed. 如果flags是所有事件，所有的事件种类被进行
  * if flags has AE_FILE_EVENTS set, file events are processed.
  * if flags has AE_TIME_EVENTS set, time events are processed.
  * if flags has AE_DONT_WAIT set the function returns ASAP until all
  * the events that's possible to process without to wait are processed.
  * if flags has AE_CALL_AFTER_SLEEP set, the aftersleep callback is called.
  *
- * The function returns the number of events processed. */
+ * The function returns the number of events processed. 返回执行事件的数目
+ * */
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
-    /* Nothing to do? return ASAP */
+    /* Nothing to do? return ASAP 不执行时间事件 也不执行文件事件 直接返回 */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
     /* Note that we want call select() even if there are no
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
-     * to fire. */
+     * to fire.
+     * 如文件描述符最大数目不为-1  或者 可以执行时间事件
+     * */
     if (eventLoop->maxfd != -1 ||
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
         int j;
