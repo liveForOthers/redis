@@ -256,6 +256,8 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id)
  * 1) Insert the event in order, so that the nearest is just the head.
  *    Much better but still insertion or deletion of timers is O(N).
  * 2) Use a skiplist to have this operation as O(1) and insertion as O(log(N)).
+ *
+ * 全遍历比较时间  查找到触发时间最小的时间事件
  */
 static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 {
@@ -351,13 +353,14 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * (that may be registered by time event callbacks just processed).
  * Without special flags the function sleeps until some file event
  * fires, or when the next time event occurs (if any).
- * 执行每一个待处理的时间事件，之后处理每一个文件事件(这些事件可能是被时间时间注册并在进程中回调
- * 如果没有特殊的flags，将会sleep知道文件时间被触发 或者 当下一个时间时间出现
+ * 执行每一个待处理的时间事件，之后处理每一个文件事件(这些事件可能是被时间事件注册并在进程中回调)
+ * 如果没有特殊的flags，将会sleep直到文件事件被触发 或者 当下一个时间事件出现
  *
  * If flags is 0, the function does nothing and returns.
  * if flags has AE_ALL_EVENTS set, all the kind of events are processed. 如果flags是所有事件，所有的事件种类被进行
  * if flags has AE_FILE_EVENTS set, file events are processed.
  * if flags has AE_TIME_EVENTS set, time events are processed.
+ * 如设置为不等待则直接返回 直到存在无需等待的可执行事件
  * if flags has AE_DONT_WAIT set the function returns ASAP until all
  * the events that's possible to process without to wait are processed.
  * if flags has AE_CALL_AFTER_SLEEP set, the aftersleep callback is called.
@@ -382,24 +385,29 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         int j;
         aeTimeEvent *shortest = NULL;
         struct timeval tv, *tvp;
-
+        /// 可执行时间时间且 可等待
         if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
+            /// 查找出触发时间最小的时间事件
             shortest = aeSearchNearestTimer(eventLoop);
+        /// 如存在等待的时间时间
         if (shortest) {
             long now_sec, now_ms;
 
-            aeGetTime(&now_sec, &now_ms);
+            aeGetTime(&now_sec, &now_ms); /// 计算当前的时间并写入 now_sec, now_ms 中
             tvp = &tv;
 
             /* How many milliseconds we need to wait for the next
-             * time event to fire? */
+             * time event to fire?
+             * 计算出仍需继续等待的时间
+             * */
             long long ms =
                 (shortest->when_sec - now_sec)*1000 +
                 shortest->when_ms - now_ms;
-
+            /// 需要继续等待 计算出继续等待的时间更新到tvp 用于文件事件可阻塞等待的时间
+            /// 时间事件已经超时了  设置为0  不让文件事件阻塞等待
             if (ms > 0) {
                 tvp->tv_sec = ms/1000;
-                tvp->tv_usec = (ms % 1000)*1000;
+                tvp->tv_usec = (ms % 1000)*1000; /// 去除秒数 留下毫秒数
             } else {
                 tvp->tv_sec = 0;
                 tvp->tv_usec = 0;
@@ -407,7 +415,9 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         } else {
             /* If we have to check for events but need to return
              * ASAP because of AE_DONT_WAIT we need to set the timeout
-             * to zero */
+             * to zero
+             * 不允许等待 tvp设为0 否则设置为NULL 无超时时间的等待
+             * */
             if (flags & AE_DONT_WAIT) {
                 tv.tv_sec = tv.tv_usec = 0;
                 tvp = &tv;
@@ -418,13 +428,16 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         }
 
         /* Call the multiplexing API, will return only on timeout or when
-         * some event fires. */
+         * some event fires.
+         * 有超时时间的调用epoll select方法 查询有无需要处理的文件事件 阻塞等待tvp时间
+         * 有文件事件返回已经就绪的数目
+         * */
         numevents = aeApiPoll(eventLoop, tvp);
 
-        /* After sleep callback. */
+        /* After sleep callback. 钩子 睡醒后处理一些事情 */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
-
+        // 循环执行阻塞拿到的文件事件
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
             int mask = eventLoop->fired[j].mask;
@@ -441,7 +454,11 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * after the readable. In such a case, we invert the calls.
              * This is useful when, for instance, we want to do things
              * in the beforeSleep() hook, like fsynching a file to disk,
-             * before replying to a client. */
+             * before replying to a client.
+             *
+             * AE_BARRIER 用于反转读写执行顺序 不反转 先处理读后处理写  反转 先处理写后处理读事件
+             * 在 beforeSleep 钩子方法中常用  比如先写一些东西  然后返回给客户端结果
+             * */
             int invert = fe->mask & AE_BARRIER;
 
             /* Note the "fe->mask & mask & ..." code: maybe an already
@@ -475,10 +492,10 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             processed++;
         }
     }
-    /* Check time events */
+    /* Check time events 执行时间事件 */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
-
+    /// 返回文件事件，时间事件执行的数目和
     return processed; /* return the number of processed file/time events */
 }
 

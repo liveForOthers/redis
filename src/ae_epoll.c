@@ -114,21 +114,23 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;
-
+    /// 传入 1 el的fd 2 el的events 3 文件描述符数目 4 超时时间
+    /// 超时时间为-1 则一直阻塞下去
     retval = epoll_wait(state->epfd,state->events,eventLoop->setsize,
             tvp ? (tvp->tv_sec*1000 + tvp->tv_usec/1000) : -1);
+    /// 存在可执行文件事件
     if (retval > 0) {
         int j;
-
         numevents = retval;
         for (j = 0; j < numevents; j++) {
             int mask = 0;
-            struct epoll_event *e = state->events+j;
+            struct epoll_event *e = state->events+j; /// todo why 为啥 state->events+0  拿到的就是准备好的事件？ linux系统调用帮忙做了？
 
             if (e->events & EPOLLIN) mask |= AE_READABLE;
             if (e->events & EPOLLOUT) mask |= AE_WRITABLE;
             if (e->events & EPOLLERR) mask |= AE_WRITABLE;
             if (e->events & EPOLLHUP) mask |= AE_WRITABLE;
+            /// 把准备好的事件存储到 eventloop的fired数组中
             eventLoop->fired[j].fd = e->data.fd;
             eventLoop->fired[j].mask = mask;
         }

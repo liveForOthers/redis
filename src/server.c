@@ -4819,10 +4819,10 @@ int main(int argc, char **argv) {
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
     spt_init(argc, argv);
 #endif
-    setlocale(LC_COLLATE,"");
+    setlocale(LC_COLLATE,"");  /// todo why 更改字符编码
     tzset(); /* Populates 'timezone' global. */
-    zmalloc_set_oom_handler(redisOutOfMemoryHandler);
-    srand(time(NULL)^getpid());
+    zmalloc_set_oom_handler(redisOutOfMemoryHandler); /// OOM 处理 当内存不足时，将需要memory的值打印出来
+    srand(time(NULL)^getpid()); /// 根据当前时间以及pid 获取随机值
     gettimeofday(&tv,NULL);
 
     char hashseed[16];
@@ -4961,6 +4961,7 @@ int main(int argc, char **argv) {
     #endif
         moduleLoadFromQueue();
         ACLLoadUsersAtStartup();
+        // 从磁盘读取已经持久化的数据 如aof开启从aof读  否则读rdb
         loadDataFromDisk();
         if (server.cluster_enabled) {
             if (verifyClusterConfigWithData() == C_ERR) {
