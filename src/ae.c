@@ -63,7 +63,7 @@
 aeEventLoop *aeCreateEventLoop(int setsize) {
     aeEventLoop *eventLoop;
     int i;
-
+    // 分配内存空间
     if ((eventLoop = zmalloc(sizeof(*eventLoop))) == NULL) goto err;
     eventLoop->events = zmalloc(sizeof(aeFileEvent)*setsize);
     eventLoop->fired = zmalloc(sizeof(aeFiredEvent)*setsize);
@@ -76,6 +76,8 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     eventLoop->maxfd = -1;
     eventLoop->beforesleep = NULL;
     eventLoop->aftersleep = NULL;
+    //aeApiCreate 不同的操作系统有不同实现 linux 中是 ae_epoll.c 中的实现
+    // 创建出文件描述符并保存在eventloop中   还未注册事件以及监听事件
     if (aeApiCreate(eventLoop) == -1) goto err;
     /* Events with mask == AE_NONE are not set. So let's initialize the
      * vector with it. */
@@ -141,11 +143,11 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         return AE_ERR;
     }
     aeFileEvent *fe = &eventLoop->events[fd];
-
+    // 给fd 注册对应事件，与eventLoop的APIDATA的epfd绑定
     if (aeApiAddEvent(eventLoop, fd, mask) == -1)
         return AE_ERR;
-    fe->mask |= mask;
-    if (mask & AE_READABLE) fe->rfileProc = proc;
+    fe->mask |= mask; /// 更新eventloop中对应文件描述符监听的事件类型
+    if (mask & AE_READABLE) fe->rfileProc = proc; /// 事件发生后回调proc处理
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
     fe->clientData = clientData;
     if (fd > eventLoop->maxfd)
@@ -206,6 +208,9 @@ static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) 
 }
 
 // 初始化时间事件链表对象  并将其赋值给eventLoop
+// 时间事件: 定时去执行的事件
+// 文件事件: linux 文件想象成Api接口  统一成fd socket也是文件事件
+// 每隔多少毫秒执行对应的 aeTimeProc 如 serverCron
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,
         aeEventFinalizerProc *finalizerProc)

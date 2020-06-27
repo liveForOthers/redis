@@ -2742,6 +2742,7 @@ void initServer(void) {
     int j;
     // signal： linux 信号量
     // ignore the sign of SIGHUP and SIGPIPE
+    // SIGHUP : 用户退出linux时 通知进程关闭  redis忽略此信号
     signal(SIGHUP, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
     // 设置redis自定义的信号 对应的action 替换linux原生信号 通过调用linux暴露的接口实现signal.h
@@ -2774,6 +2775,7 @@ void initServer(void) {
     createSharedObjects(); // 共享对象初始化 保存在share中
     adjustOpenFilesLimit();
     // 初始化事件循环队列  用来处理用户连接
+    // 将socket fd(linux系统中 也就是拿到了epoll的fd) 和事件循环组el 绑定
     server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
@@ -2784,7 +2786,9 @@ void initServer(void) {
     // redis db 初始化
     server.db = zmalloc(sizeof(redisDb)*server.dbnum);
 
-    /* Open the TCP listening socket for the user commands. */
+    /* Open the TCP listening socket for the user commands.
+     * 创建出监听某个端口的Server socket
+     * */
     if (server.port != 0 &&
         listenToPort(server.port,server.ipfd,&server.ipfd_count) == C_ERR)
         exit(1);
@@ -2861,7 +2865,7 @@ void initServer(void) {
     /* Create the timer callback, this is our way to process many background
      * operations incrementally, like clients timeout, eviction of unaccessed
      * expired keys and so forth. */
-    // 创建时间回调器 并存储在server.el中 执行后台增量操作 如客户端超时，删除过期key
+    // 创建时间回调器 并存储在server.el中 执行后台增量操作 如客户端超时，删除过期key 1ms 执行一次serverCron
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         // 创建失败直接结束
         serverPanic("Can't create event loop timers.");
@@ -2870,7 +2874,7 @@ void initServer(void) {
 
     /* Create an event handler for accepting new connections in TCP and Unix
      * domain sockets. */
-    // 创建接受连接的事件循环处理器  将acceptTcpHandler 注册到ipfd中  用于处理对应事件发生时的回调
+    // 创建接受连接的事件循环处理器  将acceptTcpHandler 注册到ipfd（之前创建出来的socket）中  用于处理对应事件发生时的回调 acceptTcpHandler处理的是接收连接的事件
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
             acceptTcpHandler,NULL) == AE_ERR)
@@ -2895,6 +2899,7 @@ void initServer(void) {
     /* Open the AOF file if needed. */
     // AOF 初始化
     if (server.aof_state == AOF_ON) {
+        // 开启aof的文件描述符， 文件名，标记位，模式
         server.aof_fd = open(server.aof_filename,
                                O_WRONLY|O_APPEND|O_CREAT,0644);
         if (server.aof_fd == -1) {
@@ -4600,7 +4605,7 @@ void setupSignalHandlers(void) {
     act.sa_handler = sigShutdownHandler;
     sigaction(SIGTERM, &act, NULL);
     sigaction(SIGINT, &act, NULL);
-
+// 如果设置了后台追踪  配置一些信号量的action
 #ifdef HAVE_BACKTRACE
     sigemptyset(&act.sa_mask);
     act.sa_flags = SA_NODEFER | SA_RESETHAND | SA_SIGINFO;

@@ -30,6 +30,8 @@
 
 
 #include <sys/epoll.h>
+#include "ae.h" // 新增
+#include "zmalloc.h" // 新增
 
 typedef struct aeApiState {
     int epfd;
@@ -45,12 +47,14 @@ static int aeApiCreate(aeEventLoop *eventLoop) {
         zfree(state);
         return -1;
     }
+    // linux 系统调用
     state->epfd = epoll_create(1024); /* 1024 is just a hint for the kernel */
     if (state->epfd == -1) {
         zfree(state->events);
         zfree(state);
         return -1;
     }
+    // 保存到eventloop中
     eventLoop->apidata = state;
     return 0;
 }
@@ -75,14 +79,16 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     struct epoll_event ee = {0}; /* avoid valgrind warning */
     /* If the fd was already monitored for some event, we need a MOD
      * operation. Otherwise we need an ADD operation. */
+    /// 如果eventLoop->events[fd].mask 已经被设置  执行modify  否则执行add
     int op = eventLoop->events[fd].mask == AE_NONE ?
             EPOLL_CTL_ADD : EPOLL_CTL_MOD;
 
     ee.events = 0;
-    mask |= eventLoop->events[fd].mask; /* Merge old events */
-    if (mask & AE_READABLE) ee.events |= EPOLLIN;
+    mask |= eventLoop->events[fd].mask; /* Merge old events */ // 与历史事件进行合并  增加执行或运算
+    if (mask & AE_READABLE) ee.events |= EPOLLIN; // 与历史事件进行合并  增加执行或运算
     if (mask & AE_WRITABLE) ee.events |= EPOLLOUT;
     ee.data.fd = fd;
+    // 系统调用 doAddEvent
     if (epoll_ctl(state->epfd,op,fd,&ee) == -1) return -1;
     return 0;
 }
@@ -90,18 +96,18 @@ static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
 static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
     aeApiState *state = eventLoop->apidata;
     struct epoll_event ee = {0}; /* avoid valgrind warning */
-    int mask = eventLoop->events[fd].mask & (~delmask);
+    int mask = eventLoop->events[fd].mask & (~delmask); // 删除指定mask  对待删除mask取反 再与即可  如 0011 -> 1100 再与就把后两位置为0
 
     ee.events = 0;
-    if (mask & AE_READABLE) ee.events |= EPOLLIN;
+    if (mask & AE_READABLE) ee.events |= EPOLLIN; // 拿到删除后待保留的事件
     if (mask & AE_WRITABLE) ee.events |= EPOLLOUT;
     ee.data.fd = fd;
-    if (mask != AE_NONE) {
+    if (mask != AE_NONE) { // 非完全删除  执行modify
         epoll_ctl(state->epfd,EPOLL_CTL_MOD,fd,&ee);
     } else {
         /* Note, Kernel < 2.6.9 requires a non null event pointer even for
          * EPOLL_CTL_DEL. */
-        epoll_ctl(state->epfd,EPOLL_CTL_DEL,fd,&ee);
+        epoll_ctl(state->epfd,EPOLL_CTL_DEL,fd,&ee); // 完全删除执行delete
     }
 }
 

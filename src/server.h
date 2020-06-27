@@ -664,7 +664,7 @@ typedef struct RedisModuleDigest {
  * Redis 对象头结构体
  */
 typedef struct redisObject {
-    unsigned type:4; // 4 bits 。类型。
+    unsigned type:4; // 4 bits 。类型。 Java  一共5种类型  4bits  可以表示 0，1，2，3，4
     unsigned encoding:4; // 4 bits 。同一类型(type) 会有不同的存储形式。
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or // LRU 时，最后访问时间
                             * LFU data (least significant 8 bits frequency
@@ -707,8 +707,8 @@ typedef struct clientReplyBlock {
  * */
 typedef struct redisDb {
     dict *dict;                 /* The keyspace for this DB */ // key => value 字典
-    dict *expires;              /* Timeout of keys with a timeout set */ // key => 过期时间的字典
-    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
+    dict *expires;              /* Timeout of keys with a timeout set */ // key => 已经过期的key的集合 字典
+    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/ /// 客户端等待的key集合
     dict *ready_keys;           /* Blocked keys that received a PUSH */
     dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
     int id;                     /* Database ID */ // 编号
