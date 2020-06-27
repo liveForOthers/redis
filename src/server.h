@@ -821,8 +821,8 @@ typedef struct user {
                         the flag ALLKEYS is set in the user. */
 } user;
 
-/* With multiplexing we need to take per-client state.
- * Clients are taken in a linked list. */
+/* With multiplexing we need to take per-client state. 需要获取每个客户端的状态
+ * Clients are taken in a linked list. 客户端用链表串起来*/
 typedef struct client {
     uint64_t id;            /* Client incremental unique ID. */
     int fd;                 /* Client socket. */
@@ -879,7 +879,7 @@ typedef struct client {
     dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
     list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
     sds peerid;             /* Cached peer ID. */
-    listNode *client_list_node; /* list node in client list */
+    listNode *client_list_node; /* list node in client list  客户端链表*/
 
     /* If this client is in tracking mode and this field is non zero,
      * invalidation messages for keys fetched by this client will be send to
