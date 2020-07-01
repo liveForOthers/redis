@@ -99,7 +99,7 @@ sds sdsnewlen(const void *init, size_t initlen) {
     sh = s_malloc(hdrlen+initlen+1);
     if (init==SDS_NOINIT)
         init = NULL;
-    else if (!init)
+    else if (!init) /// 对初始值为0的进行赋值
         memset(sh, 0, hdrlen+initlen+1);
     // 检查，如内存初始化失败直接返回null
     if (sh == NULL) return NULL;
@@ -142,12 +142,12 @@ sds sdsnewlen(const void *init, size_t initlen) {
             break;
         }
     }
+    /// 对长度非0  且 value非0 的执行赋值操作  value为0的已经在之前处理了赋值
     if (initlen && init)
-        // 执行赋值操作
         memcpy(s, init, initlen);
     // 兼容C字符串  复用C部分能力
     s[initlen] = '\0';
-    return s;
+    return s; /// 返回字符数组首位字符指针  sh申请的空间没有被回收 可以想要回收的时候通过字符首位指针找到原sds首位地址 从而找到自己占据的内存空间。 回收逻辑会用到
 }
 
 /* Create an empty (zero length) sds string. Even in this case the string

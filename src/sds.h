@@ -59,7 +59,7 @@ const char *SDS_NOINIT;
 #include <stdarg.h>
 #include <stdint.h>
 
-// 指向字符串开始位置的指针
+/// 指向字符串开始位置的指针
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.

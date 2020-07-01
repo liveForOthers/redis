@@ -91,11 +91,14 @@ client *createClient(int fd) {
      * This is useful since all the commands needs to be executed
      * in the context of a client. When commands are executed in other
      * contexts (for instance a Lua script) we need a non connected client. */
+    /// fd为-1 是由redis执行lua脚本时创建的client
     if (fd != -1) {
-        anetNonBlock(NULL,fd);
-        anetEnableTcpNoDelay(NULL,fd);
+        anetNonBlock(NULL,fd); /// 设置为非阻塞
+        anetEnableTcpNoDelay(NULL,fd); /// set TCP NO DELAY
         if (server.tcpkeepalive)
             anetKeepAlive(NULL,fd,server.tcpkeepalive);
+        /// 接受到套接字后将其注册到eventloop中 创建文件读事件 在eventloop中绑定该读事件 下一次循环即可接受该读事件（如有读事件发生 可被通知到）
+        /// readQueryFromClient 从client结构体中 读取客户端的查询缓冲区内容
         if (aeCreateFileEvent(server.el,fd,AE_READABLE,
             readQueryFromClient, c) == AE_ERR)
         {
@@ -105,15 +108,16 @@ client *createClient(int fd) {
         }
     }
 
-    selectDb(c,0);
+    selectDb(c,0); /// 填充客户端需要连的DB  写死 默认只使用第0个库
     uint64_t client_id = ++server.next_client_id;
+    /// c语言无面向对象， 属性需要自己赋值为初始值
     c->id = client_id;
     c->resp = 2;
     c->fd = fd;
     c->name = NULL;
     c->bufpos = 0;
     c->qb_pos = 0;
-    c->querybuf = sdsempty();
+    c->querybuf = sdsempty(); /// 输入缓冲区
     c->pending_querybuf = sdsempty();
     c->querybuf_peak = 0;
     c->reqtype = 0;
@@ -161,7 +165,7 @@ client *createClient(int fd) {
     c->client_tracking_redirection = 0;
     listSetFreeMethod(c->pubsub_patterns,decrRefCountVoid);
     listSetMatchMethod(c->pubsub_patterns,listMatchObjects);
-    if (fd != -1) linkClient(c);
+    if (fd != -1) linkClient(c); /// 将当前client 加入到server client 链表的末尾
     initClientMultiState(c);
     return c;
 }
@@ -780,7 +784,10 @@ int clientHasPendingReplies(client *c) {
 #define MAX_ACCEPTS_PER_CALL 1000
 static void acceptCommonHandler(int fd, int flags, char *ip) {
     client *c;
-    /// 创建client
+    /// 根据client fd 创建client并设置对应属性 (连接到客户端 获取客户端请求数据)
+    /// 对socket进行配置 并注册读事件处理器
+    /// socket设置为非阻塞 并设置NO_DELAY 和SO_KEEPALIVE 标志位关闭Nagle算法  启动socket存活检查机制
+    /// 设置读事件处理器， client发送数据后，server调用 readQueryFromClient 方法
     if ((c = createClient(fd)) == NULL) {
         serverLog(LL_WARNING,
             "Error registering fd event for the new client: %s (fd=%d)",
@@ -792,6 +799,8 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * connection. Note that we create the client instead to check before
      * for this condition, since now the socket is already set in non-blocking
      * mode and we can send an error for free using the Kernel I/O */
+    ///如客户端数目超过设置的最大客户端连接数目 发送错误消息并释放连接
+    /// todo 为啥不是建立连接前进行校验？
     if (listLength(server.clients) > server.maxclients) {
         char *err = "-ERR max number of clients reached\r\n";
 
@@ -808,6 +817,7 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
      * is no password set, nor a specific interface is bound, we don't accept
      * requests from non loopback interfaces. Instead we try to explain the
      * user what to do to fix it if needed. */
+    /// 处理未设置密码  且server为保护状态的客户端连接
     if (server.protected_mode &&
         server.bindaddr_count == 0 &&
         DefaultUser->flags & USER_FLAG_NOPASS &&
@@ -844,20 +854,20 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
             return;
         }
     }
-
+    /// 统计连接数目
     server.stat_numconnections++;
     c->flags |= flags;
 }
 
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
-    char cip[NET_IP_STR_LEN];
+    char cip[NET_IP_STR_LEN]; // 数组存储客户端ip长度 IPV6 最长为46
     UNUSED(el);
     UNUSED(mask);
     UNUSED(privdata);
 
     while(max--) {
-        // 获取客户端fd 如error 打log+ 返回
+        // 获取客户端fd 如error 打log+ 返回  如成功说明socket连接已经成功建立
         cfd = anetTcpAccept(server.neterr, fd, cip, sizeof(cip), &cport);
         if (cfd == ANET_ERR) {
             if (errno != EWOULDBLOCK)
@@ -865,11 +875,13 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     "Accepting client connection: %s", server.neterr);
             return;
         }
-        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport);
+        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport)
+        /// 进行连接建立后的处理逻辑
         acceptCommonHandler(cfd,0,cip);
     }
 }
 
+/// privdata 是指针  如过对其进行修改  外面是可以感知到的
 void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cfd, max = MAX_ACCEPTS_PER_CALL;
     UNUSED(el);
@@ -889,6 +901,7 @@ void acceptUnixHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     }
 }
 
+/// c中的static 相当于Java中的private 不是真正的类方法
 static void freeClientArgv(client *c) {
     int j;
     for (j = 0; j < c->argc; j++)
@@ -1378,7 +1391,7 @@ int processInlineBuffer(client *c) {
     /* Create redis objects for all arguments. */
     for (c->argc = 0, j = 0; j < argc; j++) {
         if (sdslen(argv[j])) {
-            c->argv[c->argc] = createObject(OBJ_STRING,argv[j]);
+            c->argv[c->argc] = createObject(OBJ_STRING,argv[j]); /// 为每个请求 创建 redis对象
             c->argc++;
         } else {
             sdsfree(argv[j]);
@@ -1576,6 +1589,7 @@ int processMultibulkBuffer(client *c) {
 int processCommandAndResetClient(client *c) {
     int deadclient = 0;
     server.current_client = c;
+    /// 执行命令
     if (processCommand(c) == C_OK) {
         if (c->flags & CLIENT_MASTER && !(c->flags & CLIENT_MULTI)) {
             /* Update the applied replication offset of our master. */
@@ -1586,6 +1600,7 @@ int processCommandAndResetClient(client *c) {
          * module blocking command, so that the reply callback will
          * still be able to access the client argv and argc field.
          * The client will be reset in unblockClientFromModule(). */
+        /// 如不是阻塞状态 重置client  可以接受下一个命令
         if (!(c->flags & CLIENT_BLOCKED) ||
             c->btype != BLOCKED_MODULE)
         {
@@ -1604,10 +1619,13 @@ int processCommandAndResetClient(client *c) {
  * more query buffer to process, because we read more data from the socket
  * or because a client was blocked and later reactivated, so there could be
  * pending query buffer, already representing a full command, to process. */
+/// 将输入缓冲区中的数据反序列化成对应的命令
+/// 根据命令类型是PROTO_REQ_MULTIBULK  还是 PROTO_REQ_INLINE 分别调用 processInlineBuffer 或 processMultibulkBuffer 方法
 void processInputBuffer(client *c) {
     /* Keep processing while there is something in the input buffer */
+    /// 死循环直到缓冲区数据读取完毕
     while(c->qb_pos < sdslen(c->querybuf)) {
-        /* Return if clients are paused. */
+        /* Return if clients are paused. 如果客户端已经停止 直接结束*/
         if (!(c->flags & CLIENT_SLAVE) && clientsArePaused()) break;
 
         /* Immediately abort if the client is in the middle of something. */
@@ -1631,6 +1649,7 @@ void processInputBuffer(client *c) {
         if (c->flags & (CLIENT_CLOSE_AFTER_REPLY|CLIENT_CLOSE_ASAP)) break;
 
         /* Determine request type when unknown. */
+        /// 判断命令请求的类型
         if (!c->reqtype) {
             if (c->querybuf[c->qb_pos] == '*') {
                 c->reqtype = PROTO_REQ_MULTIBULK;
@@ -1638,7 +1657,7 @@ void processInputBuffer(client *c) {
                 c->reqtype = PROTO_REQ_INLINE;
             }
         }
-
+        /// 从缓冲区解析命令
         if (c->reqtype == PROTO_REQ_INLINE) {
             if (processInlineBuffer(c) != C_OK) break;
             /* If the Gopher mode and we got zero or one argument, process
@@ -1659,6 +1678,7 @@ void processInputBuffer(client *c) {
         }
 
         /* Multibulk processing could see a <= 0 length. */
+        ///  参数个数为0时 重置client 并接收下一个命令
         if (c->argc == 0) {
             resetClient(c);
         } else {
@@ -1671,6 +1691,7 @@ void processInputBuffer(client *c) {
             }
 
             /* We are finally ready to execute the command. */
+            /// 执行命令 并重置client
             if (processCommandAndResetClient(c) == C_ERR) {
                 /* If the client is no longer valid, we avoid exiting this
                  * loop and trimming the client buffer later. So we return
@@ -1692,9 +1713,9 @@ void processInputBuffer(client *c) {
  * is flagged as master. Usually you want to call this instead of the
  * raw processInputBuffer(). */
 void processInputBufferAndReplicate(client *c) {
-    if (!(c->flags & CLIENT_MASTER)) {
+    if (!(c->flags & CLIENT_MASTER)) { /// 如果是普通client类型 直接调用处理
         processInputBuffer(c);
-    } else {
+    } else { /// 如果是主从client 需要将命令同步到当前节点的从服务器
         /* If the client is a master we need to compute the difference
          * between the applied offset before and after processing the buffer,
          * to understand how much of the replication stream was actually
@@ -1703,7 +1724,7 @@ void processInputBufferAndReplicate(client *c) {
          * sub-replicas and to the replication backlog. */
         size_t prev_offset = c->reploff;
         processInputBuffer(c);
-        size_t applied = c->reploff - prev_offset;
+        size_t applied = c->reploff - prev_offset; /// 判断是否同步偏移量发生变化  用于通知slave
         if (applied) {
             replicationFeedSlavesFromMasterStream(server.slaves,
                     c->pending_querybuf, applied);
@@ -1713,7 +1734,7 @@ void processInputBufferAndReplicate(client *c) {
 }
 
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
-    client *c = (client*) privdata;
+    client *c = (client*) privdata;  /// 拿到客户端对象  接受该客户端连接时已经赋值
     int nread, readlen;
     size_t qblen;
     UNUSED(el);
@@ -1723,7 +1744,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
      * the event loop. This is the case if threaded I/O is enabled. */
     if (postponeClientRead(c)) return;
 
-    readlen = PROTO_IOBUF_LEN;
+    readlen = PROTO_IOBUF_LEN; ///IO 缓冲区
     /* If this is a multi bulk request, and we are processing a bulk reply
      * that is large enough, try to maximize the probability that the query
      * buffer contains exactly the SDS string representing the object, even
@@ -1743,8 +1764,8 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
     c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
-    nread = read(fd, c->querybuf+qblen, readlen);
-    if (nread == -1) {
+    nread = read(fd, c->querybuf+qblen, readlen);     /// 系统调用读fd  最大读取16KB的数据  如超过16KB 报错
+    if (nread == -1) { /// 异常处理
         if (errno == EAGAIN) {
             return;
         } else {
@@ -1752,7 +1773,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
             freeClientAsync(c);
             return;
         }
-    } else if (nread == 0) {
+    } else if (nread == 0) { /// 客户端主动关闭连接
         serverLog(LL_VERBOSE, "Client closed connection");
         freeClientAsync(c);
         return;
@@ -1760,15 +1781,16 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         /* Append the query buffer to the pending (not applied) buffer
          * of the master. We'll use this buffer later in order to have a
          * copy of the string applied by the last command executed. */
+        /// 当client为主从客户端时， 写入 pending_querybuf结合
         c->pending_querybuf = sdscatlen(c->pending_querybuf,
                                         c->querybuf+qblen,nread);
     }
 
-    sdsIncrLen(c->querybuf,nread);
+    sdsIncrLen(c->querybuf,nread); /// 增加已读去字节数目
     c->lastinteraction = server.unixtime;
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
     server.stat_net_input_bytes += nread;
-    if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
+    if (sdslen(c->querybuf) > server.client_max_querybuf_len) { /// 如输入缓冲区数据大于系统设置的最大值 返回错误信息并释放连接
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
         bytes = sdscatrepr(bytes,c->querybuf,64);
@@ -1781,7 +1803,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* There is more data in the client input buffer, continue parsing it
      * in case to check if there is a full command to execute. */
-     processInputBufferAndReplicate(c);
+     processInputBufferAndReplicate(c); /// 执行输入缓冲区
 }
 
 void getClientsMaxBuffers(unsigned long *longest_output_list,

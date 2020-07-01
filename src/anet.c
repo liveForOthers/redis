@@ -546,6 +546,7 @@ int anetUnixServer(char *err, char *path, mode_t perm, int backlog)
 static int anetGenericAccept(char *err, int s, struct sockaddr *sa, socklen_t *len) {
     int fd;
     while(1) {
+        // 接收server套接字  返回client fd
         fd = accept(s,sa,len);
         if (fd == -1) {
             if (errno == EINTR)
@@ -566,7 +567,7 @@ int anetTcpAccept(char *err, int s, char *ip, size_t ip_len, int *port) {
     socklen_t salen = sizeof(sa);
     // 死循环直到 连接成功 或非系统中断异常出现
     if ((fd = anetGenericAccept(err,s,(struct sockaddr*)&sa,&salen)) == -1)
-        return ANET_ERR;
+        return ANET_ERR; // 异常通过错误码让上游感知
 
     if (sa.ss_family == AF_INET) {
         struct sockaddr_in *s = (struct sockaddr_in *)&sa;
