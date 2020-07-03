@@ -887,8 +887,8 @@ typedef struct client {
     uint64_t client_tracking_redirection;
 
     /* Response buffer */
-    int bufpos;
-    char buf[PROTO_REPLY_CHUNK_BYTES];
+    int bufpos; /// 当前响应缓冲区指针偏移量
+    char buf[PROTO_REPLY_CHUNK_BYTES]; /// 响应缓冲区
 } client;
 
 struct saveparam {
@@ -1433,7 +1433,7 @@ typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 struct redisCommand {
     char *name;
-    redisCommandProc *proc;
+    redisCommandProc *proc; /// 方法的函数范式 实现多态策略
     int arity;
     char *sflags;   /* Flags as string representation, one char per flag. */
     uint64_t flags; /* The actual flags, obtained from the 'sflags' field. */

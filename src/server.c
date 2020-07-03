@@ -178,7 +178,7 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
  *    specific data structures, such as: DEL, RENAME, MOVE, SELECT,
  *    TYPE, EXPIRE*, PEXPIRE*, TTL, PTTL, ...
  */
-
+/// 不同的命令 调用不同的方法 此数组包含了所有redis的命令
 struct redisCommand redisCommandTable[] = {
     {"module",moduleCommand,-2,
      "admin no-script",
@@ -3206,13 +3206,15 @@ void preventCommandReplication(client *c) {
  * preventCommandReplication(client *c);
  *
  */
+/// 不同命令的的 proc 方法是不同的，比如说名为 set 的 redisCommand 的 proc 是 setCommand 方法，而 get 的则是 getCommand 方法。通过这种形式，实际上实现在Java 中特别常见的多态策略。
 void call(client *c, int flags) {
-    long long dirty, start, duration;
+    long long dirty, start, duration; /// dirty记录数据库修改次数；start记录命令开始执行时间us；duration记录命令执行花费时间
     int client_old_flags = c->flags;
     struct redisCommand *real_cmd = c->cmd;
 
     /* Sent the command to clients in MONITOR mode, only if the commands are
      * not generated from reading an AOF. */
+    /// 有监视器的话，需要将不是从AOF获取的命令会发送给监视器。当然，这里会消耗时间
     if (listLength(server.monitors) &&
         !server.loading &&
         !(c->cmd->flags & (CMD_SKIP_MONITOR|CMD_ADMIN)))
@@ -3229,7 +3231,7 @@ void call(client *c, int flags) {
     /* Call the command. */
     dirty = server.dirty;
     start = ustime();
-    c->cmd->proc(c);
+    c->cmd->proc(c); /// 处理命令，调用命令处理函数
     duration = ustime()-start;
     dirty = server.dirty-dirty;
     if (dirty < 0) dirty = 0;
@@ -3242,6 +3244,7 @@ void call(client *c, int flags) {
     /* If the caller is Lua, we want to force the EVAL caller to propagate
      * the script if the command flag or client flag are forcing the
      * propagation. */
+    /// Lua 脚本的一些特殊处理
     if (c->flags & CLIENT_LUA && server.lua_caller) {
         if (c->flags & CLIENT_FORCE_REPL)
             server.lua_caller->flags |= CLIENT_FORCE_REPL;
@@ -3251,6 +3254,7 @@ void call(client *c, int flags) {
 
     /* Log the command into the Slow log if needed, and populate the
      * per-command statistics that we show in INFO commandstats. */
+    /// CMD_CALL_SLOWLOG 表示要记录慢查询日志
     if (flags & CMD_CALL_SLOWLOG && !(c->cmd->flags & CMD_SKIP_SLOWLOG)) {
         char *latency_event = (c->cmd->flags & CMD_FAST) ?
                               "fast-command" : "command";
@@ -3258,6 +3262,7 @@ void call(client *c, int flags) {
         slowlogPushEntryIfNeeded(c,c->argv,c->argc,duration);
     }
 
+    /// CMD_CALL_STATS 表示要统计
     if (flags & CMD_CALL_STATS) {
         /* use the real command that was executed (cmd and lastamc) may be
          * different, in case of MULTI-EXEC or re-written commands such as
@@ -3267,6 +3272,7 @@ void call(client *c, int flags) {
     }
 
     /* Propagate the command into the AOF and replication link */
+    /// CMD_CALL_PROPAGATE表示要进行广播命令
     if (flags & CMD_CALL_PROPAGATE &&
         (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP)
     {
@@ -3274,6 +3280,7 @@ void call(client *c, int flags) {
 
         /* Check if the command operated changes in the data set. If so
          * set for replication / AOF propagation. */
+        /// dirty大于0时，需要广播命令给slave和aof
         if (dirty) propagate_flags |= (PROPAGATE_AOF|PROPAGATE_REPL);
 
         /* If the client forced AOF / replication of the command, set
@@ -3294,6 +3301,8 @@ void call(client *c, int flags) {
         /* Call propagate() only if at least one of AOF / replication
          * propagation is needed. Note that modules commands handle replication
          * in an explicit way, so we never replicate them automatically. */
+        /// 广播命令，写如aof，发送命令到slave
+        /// 也就是传说中的传播命令
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
@@ -3353,16 +3362,18 @@ int processCommand(client *c) {
      * go through checking for replication and QUIT will cause trouble
      * when FORCE_REPLICATION is enabled and would be implemented in
      * a regular command proc. */
+    /// 处理 quit 命令
     if (!strcasecmp(c->argv[0]->ptr,"quit")) {
-        addReply(c,shared.ok);
-        c->flags |= CLIENT_CLOSE_AFTER_REPLY;
-        return C_ERR;
+        addReply(c,shared.ok); /// 设置  响应缓冲区为成功
+        c->flags |= CLIENT_CLOSE_AFTER_REPLY; /// 设置客户端标志位
+        return C_ERR; /// 返回错误码
     }
 
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
+    /// 从字典中查找该名字对应的真正的redis命令
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
-    if (!c->cmd) {
+    if (!c->cmd) { /// 处理未知命令
         flagTransaction(c);
         sds args = sdsempty();
         int i;
@@ -3373,7 +3384,7 @@ int processCommand(client *c) {
         sdsfree(args);
         return C_OK;
     } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
-               (c->argc < -c->cmd->arity)) {
+               (c->argc < -c->cmd->arity)) { /// 处理参数错误
         flagTransaction(c);
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
@@ -3382,6 +3393,7 @@ int processCommand(client *c) {
 
     /* Check if the user is authenticated. This check is skipped in case
      * the default user is flagged as "nopass" and is active. */
+    /// 用户权限校验
     int auth_required = !(DefaultUser->flags & USER_FLAG_NOPASS) &&
                         !c->authenticated;
     if (auth_required || DefaultUser->flags & USER_FLAG_DISABLED) {
@@ -3413,6 +3425,7 @@ int processCommand(client *c) {
      * However we don't perform the redirection if:
      * 1) The sender of this command is our master.
      * 2) The command has no key arguments. */
+    /// 集群模式，处理集群重定向。当命令发送者是master或者 命令没有任何key的参数时可以不重定向
     if (server.cluster_enabled &&
         !(c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_LUA &&
@@ -3421,7 +3434,8 @@ int processCommand(client *c) {
           c->cmd->proc != execCommand))
     {
         int hashslot;
-        int error_code;
+        int error_code
+        /// 查询可执行的node信息
         clusterNode *n = getNodeByQuery(c,c->cmd,c->argv,c->argc,
                                         &hashslot,&error_code);
         if (n == NULL || n != server.cluster->myself) {
@@ -3441,6 +3455,7 @@ int processCommand(client *c) {
      * the event loop since there is a busy Lua script running in timeout
      * condition, to avoid mixing the propagation of scripts with the
      * propagation of DELs due to eviction. */
+    /// 处理maxmemory请求，先尝试回收，如果不行，则返回异常
     if (server.maxmemory && !server.lua_timedout) {
         int out_of_memory = freeMemoryIfNeededAndSafe() == C_ERR;
         /* freeMemoryIfNeeded may flush slave output buffers. This may result
@@ -3465,6 +3480,10 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if there are problems persisting on disk
      * and if this is a master instance. */
+    /**
+     * 当此服务器是master时：aof持久化失败时，或上一次bgsave执行错误，
+     * 且配置bgsave参数和stop_writes_on_bgsave_err；禁止执行写命令
+     */
     int deny_write_type = writeCommandsDeniedByDiskError();
     if (deny_write_type != DISK_ERROR_TYPE_NONE &&
         server.masterhost == NULL &&
@@ -3484,6 +3503,10 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if there are not enough good slaves and
      * user configured the min-slaves-to-write option. */
+    /**
+     * 当此服务器时master时：如果配置了repl_min_slaves_to_write，
+     * 当slave数目小于时，禁止执行写命令
+     */
     if (server.masterhost == NULL &&
         server.repl_min_slaves_to_write &&
         server.repl_min_slaves_max_lag &&
@@ -3497,6 +3520,7 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if this is a read only slave. But
      * accept write commands if this is our master. */
+    /// 当是只读slave时，除了master的不接受其他写命令
     if (server.masterhost && server.repl_slave_ro &&
         !(c->flags & CLIENT_MASTER) &&
         c->cmd->flags & CMD_WRITE)
@@ -3507,6 +3531,7 @@ int processCommand(client *c) {
 
     /* Only allow a subset of commands in the context of Pub/Sub if the
      * connection is in RESP2 mode. With RESP3 there are no limits. */
+    /// 当客户端正在订阅频道时，只会执行以下命令
     if ((c->flags & CLIENT_PUBSUB && c->resp == 2) &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
@@ -3520,6 +3545,7 @@ int processCommand(client *c) {
     /* Only allow commands with flag "t", such as INFO, SLAVEOF and so on,
      * when slave-serve-stale-data is no and we are a slave with a broken
      * link with master. */
+    /// 服务器为slave，但没有正确连接master时，只会执行带有CMD_STALE标志的命令，如info等
     if (server.masterhost && server.repl_state != REPL_STATE_CONNECTED &&
         server.repl_serve_stale_data == 0 &&
         !(c->cmd->flags & CMD_STALE))
@@ -3531,12 +3557,14 @@ int processCommand(client *c) {
 
     /* Loading DB? Return an error if the command has not the
      * CMD_LOADING flag. */
+    /// 正在加载数据库时，只会执行带有CMD_LOADING标志的命令，其余都会被拒绝
     if (server.loading && !(c->cmd->flags & CMD_LOADING)) {
         addReply(c, shared.loadingerr);
         return C_OK;
     }
 
     /* Lua script too slow? Only allow a limited number of commands. */
+    /// 服务器因为执行lua脚本阻塞时，只会执行以下几个命令，其余都会拒绝
     if (server.lua_timedout &&
           c->cmd->proc != authCommand &&
           c->cmd->proc != helloCommand &&
@@ -3554,13 +3582,15 @@ int processCommand(client *c) {
     }
 
     /* Exec the command */
+    /// 开始执行命令
     if (c->flags & CLIENT_MULTI &&
         c->cmd->proc != execCommand && c->cmd->proc != discardCommand &&
         c->cmd->proc != multiCommand && c->cmd->proc != watchCommand)
     {
+        /// 开启了事务，命令只会入队列
         queueMultiCommand(c);
         addReply(c,shared.queued);
-    } else {
+    } else { /// 直接执行命令
         call(c,CMD_CALL_FULL);
         c->woff = server.master_repl_offset;
         if (listLength(server.ready_keys))

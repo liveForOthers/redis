@@ -247,7 +247,7 @@ int prepareClientToWrite(client *c) {
 
 int _addReplyToBuffer(client *c, const char *s, size_t len) {
     size_t available = sizeof(c->buf)-c->bufpos;
-
+    // client已经close 直接返回
     if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return C_OK;
 
     /* If there already are entries in the reply list, we cannot
@@ -255,10 +255,10 @@ int _addReplyToBuffer(client *c, const char *s, size_t len) {
     if (listLength(c->reply) > 0) return C_ERR;
 
     /* Check that the buffer has enough space available for this string. */
-    if (len > available) return C_ERR;
-
+    if (len > available) return C_ERR; /// 剩余长度校验
+    /// 执行拷贝到 响应缓冲区
     memcpy(c->buf+c->bufpos,s,len);
-    c->bufpos+=len;
+    c->bufpos+=len; /// 更新响应缓冲区偏移量
     return C_OK;
 }
 
@@ -308,6 +308,7 @@ void addReply(client *c, robj *obj) {
     if (prepareClientToWrite(c) != C_OK) return;
 
     if (sdsEncodedObject(obj)) {
+        /// 拷贝 robj中的内容到 client响应缓冲区
         if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != C_OK)
             _addReplyProtoToList(c,obj->ptr,sdslen(obj->ptr));
     } else if (obj->encoding == OBJ_ENCODING_INT) {

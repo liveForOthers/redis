@@ -66,7 +66,7 @@ static int checkStringLength(client *c, long long size) {
 
 void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     long long milliseconds = 0; /* initialized to avoid any harmness warning */
-
+    /// 设置了过期时间；expire是robj类型，获取毫秒整数值 存储在milliseconds 参数传递是传地址 不是传值
     if (expire) {
         if (getLongLongFromObjectOrReply(c, expire, &milliseconds, NULL) != C_OK)
             return;
@@ -76,20 +76,24 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
         }
         if (unit == UNIT_SECONDS) milliseconds *= 1000;
     }
-
+    /// NX，key存在时直接返回；XX，key不存在时直接返回
+    /// lookupKeyWrite 是在对应的数据库中寻找键值是否存在  存在时返回对应的值对象
     if ((flags & OBJ_SET_NX && lookupKeyWrite(c->db,key) != NULL) ||
         (flags & OBJ_SET_XX && lookupKeyWrite(c->db,key) == NULL))
     {
         addReply(c, abort_reply ? abort_reply : shared.null[c->resp]);
         return;
     }
+    /// 执行数据字典写操作  将键值添加到db的 dict 数据哈希表中
     setKey(c->db,key,val);
     server.dirty++;
+    /// 过期时间添加到过期字典 将键和过期时间添加到 expires 哈希表
     if (expire) setExpire(c,c->db,key,mstime()+milliseconds);
+    /// 键空间通知
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
     if (expire) notifyKeyspaceEvent(NOTIFY_GENERIC,
         "expire",key,c->db->id);
-    addReply(c, ok_reply ? ok_reply : shared.ok);
+    addReply(c, ok_reply ? ok_reply : shared.ok); /// 设置返回值
 }
 
 /* SET key value [NX] [XX] [EX <seconds>] [PX <milliseconds>] */
@@ -98,7 +102,7 @@ void setCommand(client *c) {
     robj *expire = NULL;
     int unit = UNIT_SECONDS;
     int flags = OBJ_SET_NO_FLAGS;
-
+    /// setCommand 会判断set命令是否携带了nx、xx、ex或者px等可选参数。
     for (j = 3; j < c->argc; j++) {
         char *a = c->argv[j]->ptr;
         robj *next = (j == c->argc-1) ? NULL : c->argv[j+1];
@@ -136,6 +140,7 @@ void setCommand(client *c) {
     }
 
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+    /// 调用setGenericCommand命令
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
@@ -156,10 +161,10 @@ void psetexCommand(client *c) {
 
 int getGenericCommand(client *c) {
     robj *o;
-
+    /// 查找键  如不存在直接返回 存在记录到robj中
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.null[c->resp])) == NULL)
         return C_OK;
-
+    /// 如果是string类型，调用 addReply 单行返回。如果是其他对象类型，则调用 addReplyBulk
     if (o->type != OBJ_STRING) {
         addReply(c,shared.wrongtypeerr);
         return C_ERR;
