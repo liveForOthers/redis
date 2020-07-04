@@ -239,6 +239,7 @@ int prepareClientToWrite(client *c) {
     /* Schedule the client to write the output buffers to the socket, unless
      * it should already be setup to do so (it has already pending data). */
     /// 如果这个 client 还未处于延迟等待写入 (CLIENT_PENDING_WRITE)的状态，则将其设置为该状态，并将其加入到 Redis 的等待写入返回值客户端队列中，也就是 clients_pending_write队列。
+    /// prepareClientToWrite 函数，将客户端加入到了Redis 的等待写入返回值客户端队列中，也就是 clients_pending_write 队列。请求处理的事件处理逻辑就结束了，等待 Redis 下一次事件循环处理时，将响应从输出缓冲区写入到 socket 中。
     if (!clientHasPendingReplies(c)) clientInstallWriteHandler(c);
 
     /* Authorize the caller to queue in the output buffer of this client. */
@@ -319,6 +320,7 @@ void addReply(client *c, robj *obj) {
         /// 需要将响应内容添加到output buffer中。总体思路是，先尝试向固定buffer添加，添加失败的话，在尝试添加到响应链表
         /// Redis 将存储等待返回的响应数据的空间，也就是输出缓冲区分成两部分，一个固定大小的 buffer 和一个响应内容数据的链表。
         /// 在链表为空并且 buffer 有足够空间时，则将响应添加到 buffer 中。如果 buffer 满了则创建一个节点追加到链表上。_addReplyToBuffer 和 _addReplyObjectToList 就是分别向这两个空间写数据的方法。
+        /// 固定buffer和响应链表，整体上构成了一个队列。这么组织的好处是，既可以 1 节省内存，不需一开始预先分配大块内存，2 并且可以避免频繁分配、回收内存。
         if (_addReplyToBuffer(c,obj->ptr,sdslen(obj->ptr)) != C_OK)
             _addReplyProtoToList(c,obj->ptr,sdslen(obj->ptr));
     } else if (obj->encoding == OBJ_ENCODING_INT) { /// int类型string的优化
@@ -1143,40 +1145,44 @@ client *lookupClientByID(uint64_t id) {
  * This function is called by threads, but always with handler_installed
  * set to 0. So when handler_installed is set to 0 the function must be
  * thread safe. */
+// 将输出缓冲区中的数据写入socket，如果还有数据未处理则返回C_OK
 int writeToClient(int fd, client *c, int handler_installed) {
     ssize_t nwritten = 0, totwritten = 0;
     size_t objlen;
     clientReplyBlock *o;
-
+    /// 仍然有数据未写入
     while(clientHasPendingReplies(c)) {
+        /// 如果缓冲区有数据
         if (c->bufpos > 0) {
+            /// 写入到 fd 代表的 socket 中
             nwritten = write(fd,c->buf+c->sentlen,c->bufpos-c->sentlen);
             if (nwritten <= 0) break;
             c->sentlen += nwritten;
-            totwritten += nwritten;
+            totwritten += nwritten; /// 统计本次一共输出了多少子节
 
             /* If the buffer was sent, set bufpos to zero to continue with
              * the remainder of the reply. */
+            /// buffer中的数据已经发送，则重置标志位，让响应的后续数据写入buffer
             if ((int)c->sentlen == c->bufpos) {
                 c->bufpos = 0;
                 c->sentlen = 0;
             }
-        } else {
+        } else {   /// 缓冲区没有数据，从reply队列中拿
             o = listNodeValue(listFirst(c->reply));
             objlen = o->used;
-
             if (objlen == 0) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
                 continue;
             }
-
+            /// 将队列中的数据写入 socket
             nwritten = write(fd, o->buf + c->sentlen, objlen - c->sentlen);
             if (nwritten <= 0) break;
             c->sentlen += nwritten;
             totwritten += nwritten;
 
             /* If we fully sent the object on head go to the next one */
+            /// 如果写入成功，则删除队列
             if (c->sentlen == objlen) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
@@ -1199,6 +1205,7 @@ int writeToClient(int fd, client *c, int handler_installed) {
          * Moreover, we also send as much as possible if the client is
          * a slave (otherwise, on high-speed traffic, the replication
          * buffer will grow indefinitely) */
+        /// 如果输出的字节数量已经超过NET_MAX_WRITES_PER_EVENT限制，break
         if (totwritten > NET_MAX_WRITES_PER_EVENT &&
             (server.maxmemory == 0 ||
              zmalloc_used_memory() < server.maxmemory) &&
@@ -1228,9 +1235,11 @@ int writeToClient(int fd, client *c, int handler_installed) {
          * adDeleteFileEvent() is not thread safe: however writeToClient()
          * is always called with handler_installed set to 0 from threads
          * so we are fine. */
+        /// 如果内容已经全部输出，删除事件处理器
         if (handler_installed) aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
 
         /* Close connection after entire reply has been sent. */
+        /// 数据全部返回，则关闭client和连接
         if (c->flags & CLIENT_CLOSE_AFTER_REPLY) {
             freeClientAsync(c);
             return C_ERR;
@@ -1250,11 +1259,13 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
  * we can just write the replies to the client output buffer without any
  * need to use a syscall in order to install the writable event handler,
  * get it called, and so forth. */
+/// 直接将返回值写到client的输出缓冲区中，不需要进行系统调用，也不需要注册写事件处理器
 int handleClientsWithPendingWrites(void) {
     listIter li;
     listNode *ln;
+    /// 获取系统延迟写队列的长度
     int processed = listLength(server.clients_pending_write);
-
+    /// 遍历 clients_pending_write 列表，
     listRewind(server.clients_pending_write,&li);
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);
@@ -1263,13 +1274,19 @@ int handleClientsWithPendingWrites(void) {
 
         /* If a client is protected, don't do anything,
          * that may trigger write error or recreate handler. */
+        /// 如果客户端是保护状态  不做任何事 可能会触发写错误  或  重新创建处理器
         if (c->flags & CLIENT_PROTECTED) continue;
 
         /* Try to write buffers to the client socket. */
+        /// 对于每个 client 都会先调用 writeToClient 方法来尝试将返回数据从输出缓存区写入到 socekt中
+        /// 将缓冲值写入client的socket中，如果写完，则跳过之后的操作。
         if (writeToClient(c->fd,c,0) == C_ERR) continue;
 
         /* If after the synchronous writes above we still have data to
          * output to the client, we need to install the writable handler. */
+        /// 如果还未写完，则只能调用 aeCreateFileEvent 方法来注册一个写数据事件处理器 sendReplyToClient，等待 Redis 事件机制的再次调用。
+        /// 这样的好处时对于返回数据较少的客户端，不需要麻烦的注册写数据事件，等待事件触发再写数据到 socket，而是在下一次事件循环周期就直接将数据写到 socket中，加快了数据返回的响应速度。
+        /// 但是从这里也会发现，如果 clients_pending_write 队列过长，则处理时间也会很久，阻塞正常的事件响应处理，导致 Redis 后续命令延时增加。
         if (clientHasPendingReplies(c)) {
             int ae_flags = AE_WRITABLE;
             /* For the fsync=always policy, we want that a given FD is never
@@ -1282,6 +1299,8 @@ int handleClientsWithPendingWrites(void) {
             {
                 ae_flags |= AE_BARRIER;
             }
+            /// 注册写事件处理器 sendReplyToClient，等待执行
+            /// sendReplyToClient 方法其实也会调用 writeToClient 方法，该方法就是将输出缓冲区中的 buf 和 reply 列表中的数据都尽可能多的写入到对应的 socket中。
             if (aeCreateFileEvent(server.el, c->fd, ae_flags,
                 sendReplyToClient, c) == AE_ERR)
             {

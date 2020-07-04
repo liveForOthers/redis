@@ -524,6 +524,8 @@ int aeWait(int fd, int mask, long long milliseconds) {
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
+        /// 对 clients_pending_write 列表进行处理在beforesleep中
+        /// beforeSleep 函数会调用 handleClientsWithPendingWrites 函数来处理 clients_pending_write 列表。
         if (eventLoop->beforesleep != NULL)
             eventLoop->beforesleep(eventLoop);
         aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);

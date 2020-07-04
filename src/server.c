@@ -2087,6 +2087,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     flushAppendOnlyFile(0);
 
     /* Handle writes with pending output buffers. */
+    /// beforeSleep 函数会调用 handleClientsWithPendingWrites 函数来处理 clients_pending_write 列表。
     handleClientsWithPendingWritesUsingThreads();
 
     /* Close clients that need to be closed asynchronous */
