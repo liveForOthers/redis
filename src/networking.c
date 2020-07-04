@@ -1377,9 +1377,11 @@ int processInlineBuffer(client *c) {
     size_t querylen;
 
     /* Search for end of line */
+    /// 命令之间通过 \n 进行分隔
     newline = strchr(c->querybuf+c->qb_pos,'\n');
 
     /* Nothing to do without a \r\n */
+    /// 异常情况提前返回
     if (newline == NULL) {
         if (sdslen(c->querybuf)-c->qb_pos > PROTO_INLINE_MAX_SIZE) {
             addReplyError(c,"Protocol error: too big inline request");
@@ -1389,12 +1391,14 @@ int processInlineBuffer(client *c) {
     }
 
     /* Handle the \r\n case. */
+    /// 兼容 \r\n 的情况  不同操作系统的换行符不一样  window系统是 \r\n unix 是\n Mac 是 \r
     if (newline && newline != c->querybuf+c->qb_pos && *(newline-1) == '\r')
         newline--, linefeed_chars++;
 
     /* Split the input buffer up to the \r\n */
     querylen = newline-(c->querybuf+c->qb_pos);
     aux = sdsnewlen(c->querybuf+c->qb_pos,querylen);
+    /// 分割后的字符数组存储在argv中   数组大小存储在argc中
     argv = sdssplitargs(aux,&argc);
     sdsfree(aux);
     if (argv == NULL) {
@@ -1414,11 +1418,12 @@ int processInlineBuffer(client *c) {
 
     /* Setup argv array on client structure */
     if (argc) {
-        if (c->argv) zfree(c->argv);
-        c->argv = zmalloc(sizeof(robj*)*argc);
+        if (c->argv) zfree(c->argv); /// 释放client原来的argv的值
+        c->argv = zmalloc(sizeof(robj*)*argc); /// 重新为其分配argc个空间
     }
 
     /* Create redis objects for all arguments. */
+    /// 为分割后的每个命令 创建redis对象 并存储client的argv中  并更新client的argc个数
     for (c->argc = 0, j = 0; j < argc; j++) {
         if (sdslen(argv[j])) {
             c->argv[c->argc] = createObject(OBJ_STRING,argv[j]); /// 为每个请求 创建 redis对象
@@ -1427,7 +1432,7 @@ int processInlineBuffer(client *c) {
             sdsfree(argv[j]);
         }
     }
-    zfree(argv);
+    zfree(argv); /// 释放临时字符串数组空间  因为字符串对象都是redis自己申请的堆内存空间(线程共享的)需要手动释放  而int占用的栈空间(线程私有的) 方法结束自动释放
     return C_OK;
 }
 
@@ -1811,7 +1816,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         /* Append the query buffer to the pending (not applied) buffer
          * of the master. We'll use this buffer later in order to have a
          * copy of the string applied by the last command executed. */
-        /// 当client为主从客户端时， 写入 pending_querybuf结合
+        /// 当client为主从客户端时， 将请求数据写入到 pending_querybuf 中 用于主从模式 记录主节点上一次的命令 写到aof中?
         c->pending_querybuf = sdscatlen(c->pending_querybuf,
                                         c->querybuf+qblen,nread);
     }
