@@ -3008,6 +3008,7 @@ void populateCommandTable(void) {
             serverPanic("Unsupported command flag");
 
         c->id = ACLGetCommandID(c->name); /* Assign the ID used for ACL. */
+        /// 将commandstable 中的element 加入到 server的hash table中 加速命令查询
         retval1 = dictAdd(server.commands, sdsnew(c->name), c);
         /* Populate an additional dictionary that will be unaffected
          * by rename-command statements in redis.conf. */
@@ -3209,7 +3210,7 @@ void preventCommandReplication(client *c) {
  */
 /// 不同命令的的 proc 方法是不同的，比如说名为 set 的 redisCommand 的 proc 是 setCommand 方法，而 get 的则是 getCommand 方法。通过这种形式，实际上实现在Java 中特别常见的多态策略。
 void call(client *c, int flags) {
-    long long dirty, start, duration; /// dirty记录数据库修改次数；start记录命令开始执行时间us；duration记录命令执行花费时间
+    long long dirty, start, duration; /// dirty记录数据库修改次数  隔一段时间fork一个进程 把脏值更新到db中；start记录命令开始执行时间us；duration记录命令执行花费时间
     int client_old_flags = c->flags;
     struct redisCommand *real_cmd = c->cmd;
 
@@ -3233,8 +3234,8 @@ void call(client *c, int flags) {
     dirty = server.dirty;
     start = ustime();
     c->cmd->proc(c); /// 处理命令，调用命令处理函数
-    duration = ustime()-start;
-    dirty = server.dirty-dirty;
+    duration = ustime()-start;  /// 耗时
+    dirty = server.dirty-dirty; /// 执行后 新增加的dirty数目
     if (dirty < 0) dirty = 0;
 
     /* When EVAL is called loading the AOF we don't want commands called
@@ -3373,8 +3374,9 @@ int processCommand(client *c) {
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
     /// 从字典中查找该名字对应的真正的redis命令
+    /// 命令行第一个串 是命令的名称   如 set  get。。。
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
-    if (!c->cmd) { /// 处理未知命令
+    if (!c->cmd) { /// 处理未知命令  打印日志 1 命令类型+ 2 命令前缀 提前结束
         flagTransaction(c);
         sds args = sdsempty();
         int i;
@@ -3385,8 +3387,9 @@ int processCommand(client *c) {
         sdsfree(args);
         return C_OK;
     } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
-               (c->argc < -c->cmd->arity)) { /// 处理参数错误
-        flagTransaction(c);
+               (c->argc < -c->cmd->arity)) { /// 处理参数个数错误  1  arity > 0 时 与argc个数相等 2 arity小于0 时取反 要<= argc 如get arity2  则get后又且必须有key   如 set arity -3 则命令至少为 set key value 还可以有可选参数设置 如timeout
+        flagTransaction(c); /// 给client请求 加上错误flag 说明请求错误
+        /// 错误信息 写入client的 响应缓冲区中
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
         return C_OK;

@@ -1432,8 +1432,8 @@ typedef struct pubsubPattern {
 typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 struct redisCommand {
-    char *name;
-    redisCommandProc *proc; /// 方法的函数范式 实现多态策略
+    char *name; /// 命令的名称。比如set get等。
+    redisCommandProc *proc; /// 命令要调用的函数名称,  方法的函数范式 实现多态策略
     int arity;
     char *sflags;   /* Flags as string representation, one char per flag. */
     uint64_t flags; /* The actual flags, obtained from the 'sflags' field. */

@@ -480,7 +480,7 @@ void dictRelease(dict *d)
     _dictClear(d,&d->ht[1],NULL);
     zfree(d);
 }
-
+/// 存在返回对应的 entry(包含key和 value 以及next)
 dictEntry *dictFind(dict *d, const void *key)
 {
     dictEntry *he;
