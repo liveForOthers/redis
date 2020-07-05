@@ -77,7 +77,7 @@ typedef struct dict {
     dictType *type;
     void *privdata;
     dictht ht[2]; // 两个 dictht 。一般只使用第一个；扩容时，第一个是老的，第二个是新的，扩容完成后，老的指向新的。
-    long rehashidx; /* rehashing not in progress if rehashidx == -1 */
+    long rehashidx; /* rehashing not in progress if rehashidx == -1 */ /// 不为-1 表示待rehash的slots的下标
     unsigned long iterators; /* number of iterators currently running */
 } dict;
 
