@@ -138,14 +138,18 @@ static int dictAdd(dict *ht, void *key, void *val) {
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
+    /// 获取slot位置 如key已存在  直接返回错误
     if ((index = _dictKeyIndex(ht, key)) == -1)
         return DICT_ERR;
 
     /* Allocates the memory and stores key */
+    /// 给新增元素分配空间
     entry = malloc(sizeof(*entry));
+    /// 头插法 插入效率更高  链地址法解决hash冲突
     entry->next = ht->table[index];
     ht->table[index] = entry;
 
+    /// 将key  以及value加入到entry中
     /* Set the hash entry fields. */
     dictSetHashKey(ht, entry, key);
     dictSetHashVal(ht, entry, val);
@@ -322,17 +326,19 @@ static int _dictKeyIndex(dict *ht, const void *key) {
     dictEntry *he;
 
     /* Expand the hashtable if needed */
+    /// 为空 或者 存在元素个数 等于 字典大小时 执行扩容 初始值为4 以后每次扩容为原先的2倍 思考: 删除元素时会不会缩容？
     if (_dictExpandIfNeeded(ht) == DICT_ERR)
-        return -1;
+        return -1; /// 扩容失败 返回-1  不允许增加
     /* Compute the key hash value */
+    /// 容量满足2^n 使用位操作 取代取余操作
     h = dictHashKey(ht, key) & ht->sizemask;
     /* Search if this slot does not already contain the given key */
     he = ht->table[h];
-    while(he) {
-        if (dictCompareHashKeys(ht, key, he->key))
+    while(he) { /// 遍历该slot的链表元素
+        if (dictCompareHashKeys(ht, key, he->key)) /// key已存在 返回-1
             return -1;
         he = he->next;
     }
-    return h;
+    return h; /// 返回slot位置
 }
 
