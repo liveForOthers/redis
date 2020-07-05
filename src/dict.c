@@ -1006,6 +1006,7 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+/// 如key存在  返回-1  如不存在  返回的为在新容器中的下标
 static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **existing)
 {
     unsigned long idx, table;
@@ -1013,8 +1014,10 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
+    /// 如需执行扩容 尝试扩容
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
+    /// 分别从两个容器中查找  因为是单线程的 所以可以认为是原子操作
     for (table = 0; table <= 1; table++) {
         idx = hash & d->ht[table].sizemask;
         /* Search if this slot does not already contain the given key */
@@ -1022,7 +1025,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
                 if (existing) *existing = he;
-                return -1;
+                return -1; /// 已存在对应key  返回-1
             }
             he = he->next;
         }
