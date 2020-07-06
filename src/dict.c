@@ -31,6 +31,20 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
+ *
+ * 哈希表的两个关键点：
+ * 1 避免负载因子过高需要扩容，扩容后需要rehash迁移数据，O(N) 时间复杂度操作。如海量数据，将严重影响redis的稳定性。
+ *   解决：渐进式rehash
+ *   分而治之，将耗时的n次操作分摊到每一次的增删改查以及定时任务中，保证系统可用性稳定性
+ * 2 hash函数设计不合理，极端情况下会变为线性表，严重影响吞吐量
+ *
+ * 为什么容量为2的幂？
+ * 1 提高数组下标计算效率 通过 n&(size-1) 即可取代取余
+ * 2 减少hash冲突概率
+ *   如：size=8  size-1 = 0111 1111
+ *   那么 后7位不同的两个hash值对应的key  必然落在不同的slot内
+ * 3 如果是数据库分表扩容 可以省略一半数据的迁移  但redis是两个dict渐进式rehash  无此优势
+ *
  */
 
 #include "fmacros.h"
@@ -153,7 +167,7 @@ int dictExpand(dict *d, unsigned long size)
         return DICT_ERR;
 
     dictht n; /* the new hash table */
-    unsigned long realsize = _dictNextPower(size); /// 1 确保扩容不越界  2 保证容量为2的幂次
+    unsigned long realsize = _dictNextPower(size); /// 1 确保扩容不越界  2 保证容量为2的幂次  且大于等于 used*2
 
     /* Rehashing to the same table size is not useful. */
     /// 出现这种情况 说明容量不能再继续扩大了 超出最大值了
@@ -163,7 +177,7 @@ int dictExpand(dict *d, unsigned long size)
     /// 新的容器初始化
     n.size = realsize;
     n.sizemask = realsize-1;
-    n.table = zcalloc(realsize*sizeof(dictEntry*));
+    n.table = zcalloc(realsize*sizeof(dictEntry*)); /// 给一维数组分配连续空间(可以像访问一维数组一样访问空间内容)
     n.used = 0;
 
     /* Is this the first initialization? If so it's not really a rehashing
@@ -190,7 +204,7 @@ int dictExpand(dict *d, unsigned long size)
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
-/// 真正的触发扩容后的rehash操作 采用渐进式完成rehash  分别由 插入，删除，查找触发
+/// 真正的触发扩容后的rehash操作 采用渐进式完成rehash  分别由 插入，删除，查找，定时任务触发
 /// 参数n 指定了本次对多少个slots 进行rehash
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */  /// 设置最多处理的空slot数目
@@ -981,7 +995,7 @@ static int _dictExpandIfNeeded(dict *d)
         (dict_can_resize || // 条件二（第一种）：字典可以变更大小。如果 Redis 正在做 bgsave ，为了减少内存页的过多分离（COW），Redis 尽量不去扩容。
          d->ht[0].used/d->ht[0].size > dict_force_resize_ratio)) // 条件二（第二种）：hash 表中的元素是一维数组的 5 倍时，强制扩容。
     {
-        return dictExpand(d, d->ht[0].used*2); // 两倍扩容
+        return dictExpand(d, d->ht[0].used*2); // 期望扩容为 大于等于used两倍的2的最小次幂
     }
     return DICT_OK;
 }
