@@ -451,7 +451,7 @@ sds hashTypeCurrentObjectNewSds(hashTypeIterator *hi, int what) {
 robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
     robj *o = lookupKeyWrite(c->db,key);
     if (o == NULL) {
-        o = createHashObject();
+        o = createHashObject(); /// 创建ziplist
         dbAdd(c->db,key,o);
     } else {
         if (o->type != OBJ_HASH) {
@@ -540,7 +540,7 @@ void hsetCommand(client *c) {
     hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 是否需要对此key的value进行压缩列表到hash表转换
 
     for (i = 2; i < c->argc; i += 2)
-        created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 统计数目
+        created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 一组一组 保存 field value  field存在 执行覆盖
 
     /* HMSET (deprecated) and HSET return value is different. */
     char *cmdname = c->argv[0]->ptr;

@@ -578,8 +578,8 @@ void zipEntry(unsigned char *p, zlentry *e) {
 unsigned char *ziplistNew(void) {
     unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE;
     unsigned char *zl = zmalloc(bytes);
-    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes);
-    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE);
+    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes); /// 取当前ziplist总长度的，包括头部长度以及entry的总长度，也就是 第一个32bit的 total bytes。
+    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE); /// 取最后一个entry位置的，也就是last item offset所保存的值
     ZIPLIST_LENGTH(zl) = 0;
     zl[bytes-1] = ZIP_END;
     return zl;
