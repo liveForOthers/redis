@@ -535,12 +535,12 @@ void hsetCommand(client *c) {
         addReplyError(c,"wrong number of arguments for HMSET");
         return;
     }
-
+    /// 查找key对应的value  如不存在创建并返回  如类型错误 响应异常 结束
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-    hashTypeTryConversion(o,c->argv,2,c->argc-1);
+    hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 是否需要对此key的value进行压缩列表到hash表转换
 
     for (i = 2; i < c->argc; i += 2)
-        created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
+        created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 统计数目
 
     /* HMSET (deprecated) and HSET return value is different. */
     char *cmdname = c->argv[0]->ptr;

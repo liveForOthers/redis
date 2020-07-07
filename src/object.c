@@ -144,7 +144,7 @@ robj *createStringObjectFromLongLongWithOptions(long long value, int valueobj) {
 
     if (value >= 0 && value < OBJ_SHARED_INTEGERS && valueobj == 0) {
         incrRefCount(shared.integers[value]);
-        o = shared.integers[value];
+        o = shared.integers[value]; /// 使用redis共享的10000个整数 节约空间  参考java 共享的512 个整数 <512  可用== 比较
     } else {
         if (value >= LONG_MIN && value <= LONG_MAX) {
             o = createObject(OBJ_STRING, NULL);
