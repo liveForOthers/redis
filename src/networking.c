@@ -888,7 +888,7 @@ void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     "Accepting client connection: %s", server.neterr);
             return;
         }
-        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport)
+        serverLog(LL_VERBOSE,"Accepted %s:%d", cip, cport);
         /// 进行连接建立后的处理逻辑
         acceptCommonHandler(cfd,0,cip);
     }

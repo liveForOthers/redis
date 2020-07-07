@@ -3438,7 +3438,7 @@ int processCommand(client *c) {
           c->cmd->proc != execCommand))
     {
         int hashslot;
-        int error_code
+        int error_code;
         /// 查询可执行的node信息
         clusterNode *n = getNodeByQuery(c,c->cmd,c->argv,c->argc,
                                         &hashslot,&error_code);
