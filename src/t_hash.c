@@ -180,7 +180,7 @@ int hashTypeExists(robj *o, sds field) {
 
 /* Add a new field, overwrite the old with the new value if it already exists.
  * Return 0 on insert and 1 on update.
- *
+ * 给定的robj中 增加key为field 的键值对
  * By default, the key and value SDS strings are copied if needed, so the
  * caller retains ownership of the strings passed. However this behavior
  * can be effected by passing appropriate flags (possibly bitwise OR-ed):
@@ -201,30 +201,32 @@ int hashTypeExists(robj *o, sds field) {
 #define HASH_SET_COPY 0
 int hashTypeSet(robj *o, sds field, sds value, int flags) {
     int update = 0;
-
+    /// robj 创建出来默认类型是 压缩列表
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
         zl = o->ptr;
-        fptr = ziplistIndex(zl, ZIPLIST_HEAD);
+        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取尾巴节点的entry 如无节点 返回null
         if (fptr != NULL) {
-            fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1);
-            if (fptr != NULL) {
+            fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1); /// 线性遍历查找有无同一个field
+            if (fptr != NULL) { /// 该field已经被设置 执行value覆盖
                 /* Grab pointer to the value (fptr points to the field) */
                 vptr = ziplistNext(zl, fptr);
                 serverAssert(vptr != NULL);
                 update = 1;
 
                 /* Delete value */
-                zl = ziplistDelete(zl, &vptr);
+                zl = ziplistDelete(zl, &vptr); /// 删除旧value
 
-                /* Insert new value */
+                /* Insert new value */ /// 插入新的value
                 zl = ziplistInsert(zl, vptr, (unsigned char*)value,
                         sdslen(value));
             }
         }
 
         if (!update) {
+            /// 该field 不存在 执行插入 插入两次 对于压缩列表 field与 value分别作为一个entry插入 只不过value有多个
+            /// todo 需要关注下压缩列表数据结构  优缺点 注意点
             /* Push new field/value pair onto the tail of the ziplist */
             zl = ziplistPush(zl, (unsigned char*)field, sdslen(field),
                     ZIPLIST_TAIL);
@@ -236,7 +238,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         /* Check if the ziplist needs to be converted to a hash table */
         if (hashTypeLength(o) > server.hash_max_ziplist_entries)
             hashTypeConvert(o, OBJ_ENCODING_HT);
-    } else if (o->encoding == OBJ_ENCODING_HT) {
+    } else if (o->encoding == OBJ_ENCODING_HT) { /// 如果robj是 hash类型
         dictEntry *de = dictFind(o->ptr,field);
         if (de) {
             sdsfree(dictGetVal(de));
@@ -263,7 +265,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
             }
             dictAdd(o->ptr,f,v);
         }
-    } else {
+    } else { /// 不支持除了压缩列表以及 真实hash类型的其他类型
         serverPanic("Unknown hash encoding");
     }
 

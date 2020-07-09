@@ -119,6 +119,24 @@
  *        |             |          |       |       |     |
  *     zlbytes        zltail    entries   "2"     "5"   end
  *
+ * <zlbytes> <zltail> <zllen> <entry>...<entry> <zlend>
+ *
+ * <zlbytes> : 4bytes ziplist 占用字节总数 包括自身
+ * <zltail>: 4bytes 尾巴节点在ziplist 中的偏移字节数 便于快速找到最后一个节点  从后向前遍历
+ * <zllen>: 2 bytes 表示ziplist entry个数
+ * <entry>: 真实的数据
+ * <zlend>: 1byte 标记ziplist结束 值固定为255
+ * 意义:
+ * 1 节约内存空间
+ * 2 比双向链表 节约了各个节点相互连接的地址指针， 顺序IO 提高读写效率 避免内存碎片  顺序IO 数据量不大情况下 效率不比hash差
+ * 3 值的存储采用变长编码方式 按需分配
+ *
+ * 不擅长修改，非常适应于增加，数目少，value较小的场景
+ * 当元素个数超过512  或value 长度大于64时， 执行ziplist转为hash结构
+ *
+ * ziplist 是list(3.2之前是， 之后使用quicklist)， hash， zset (数目小于512对且 value长度不超过64时 否则转为hash)底层数据实现
+ * 较少数据下  使用时间换空间。 数组比链表更省空间(更少的指针域)
+ *
  * The first 4 bytes represent the number 15, that is the number of bytes
  * the whole ziplist is composed of. The second 4 bytes are the offset
  * at which the last ziplist entry is found, that is 12, in fact the
@@ -269,23 +287,23 @@
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
 typedef struct zlentry {
-    unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/
-    unsigned int prevrawlen;     /* Previous entry len. */
+    unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/ /// 每一个len所占bytes个数
+    unsigned int prevrawlen;     /* Previous entry len. */ /// 记录前一个entry的长度  因为顺序写 知道了当前entry的首地址 再减去前一个entry长度就拿到了前一个entry的首地址 反向遍历
     unsigned int lensize;        /* Bytes used to encode this entry type/len.
                                     For example strings have a 1, 2 or 5 bytes
-                                    header. Integers always use a single byte.*/
+                                    header. Integers always use a single byte.*/ /// 每一个len的长度 如string 每一个len可以为1, 2, 5 个bytes integer只有单bytes
     unsigned int len;            /* Bytes used to represent the actual entry.
                                     For strings this is just the string length
                                     while for integers it is 1, 2, 3, 4, 8 or
                                     0 (for 4 bit immediate) depending on the
-                                    number range. */
+                                    number range. */ /// 当前节点数据项实际长度
     unsigned int headersize;     /* prevrawlensize + lensize. */
     unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
                                     the entry encoding. However for 4 bits
                                     immediate integers this can assume a range
-                                    of values and must be range-checked. */
+                                    of values and must be range-checked. */ /// 编码类型 每个zlentry 有自己的独立编码类型 节省内存 可以是integer或string， 当为string时， 前2bits (00，01，10) 分别代表了string类型 其他bit表示string长度 当是int时。前2 bits为11 其他位为值
     unsigned char *p;            /* Pointer to the very start of the entry, that
-                                    is, this points to prev-entry-len field. */
+                                    is, this points to prev-entry-len field. */ /// 指向节点起点位置的指针
 } zlentry;
 
 #define ZIPLIST_ENTRY_ZERO(zle) { \
@@ -761,9 +779,10 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     zlentry tail;
 
     /* Find out prevlen for the entry that is inserted. */
-    if (p[0] != ZIP_END) {
+    /// 找出待插入节点的prevlen
+    if (p[0] != ZIP_END) { /// p为头部节点  说明期望插入头部位置
         ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
-    } else {
+    } else { /// 期望插入尾巴位置
         unsigned char *ptail = ZIPLIST_ENTRY_TAIL(zl);
         if (ptail[0] != ZIP_END) {
             prevlen = zipRawEntryLength(ptail);
@@ -964,6 +983,7 @@ unsigned char *ziplistMerge(unsigned char **first, unsigned char **second) {
 
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where) {
     unsigned char *p;
+    /// 仅允许 首尾插入
     p = (where == ZIPLIST_HEAD) ? ZIPLIST_ENTRY_HEAD(zl) : ZIPLIST_ENTRY_END(zl);
     return __ziplistInsert(zl,p,s,slen);
 }
