@@ -596,10 +596,10 @@ void zipEntry(unsigned char *p, zlentry *e) {
 unsigned char *ziplistNew(void) {
     unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE;
     unsigned char *zl = zmalloc(bytes);
-    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes); /// 取当前ziplist总长度的，包括头部长度以及entry的总长度，也就是 第一个32bit的 total bytes。
-    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE); /// 取最后一个entry位置的，也就是last item offset所保存的值
-    ZIPLIST_LENGTH(zl) = 0;
-    zl[bytes-1] = ZIP_END;
+    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes); /// 设置当前ziplist总长度的，包括头部长度以及entry的总长度，也就是 4+4+2+1bytes
+    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE); /// 设置最后一个entry偏移量，也就是last item offset所保存的值 4+4+2bytes
+    ZIPLIST_LENGTH(zl) = 0; /// 设置压缩列表实际元素数目 空列表设置为0
+    zl[bytes-1] = ZIP_END; /// 链表尾巴赋值
     return zl;
 }
 
@@ -991,6 +991,7 @@ unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int sle
 /* Returns an offset to use for iterating with ziplistNext. When the given
  * index is negative, the list is traversed back to front. When the list
  * doesn't contain an element at the provided index, NULL is returned. */
+/// 查询指定位于index位置的节点的偏移量，当index为负数 则取正从后往前找
 unsigned char *ziplistIndex(unsigned char *zl, int index) {
     unsigned char *p;
     unsigned int prevlensize, prevlen = 0;
@@ -1010,7 +1011,7 @@ unsigned char *ziplistIndex(unsigned char *zl, int index) {
             p += zipRawEntryLength(p);
         }
     }
-    return (p[0] == ZIP_END || index > 0) ? NULL : p;
+    return (p[0] == ZIP_END || index > 0) ? NULL : p; /// 如该index位置元素不存在返回null 否则返回该位置元素偏移量
 }
 
 /* Return pointer to next entry in ziplist.

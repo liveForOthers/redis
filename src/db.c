@@ -54,13 +54,13 @@ void updateLFU(robj *val) {
  * lookupKeyWrite() and lookupKeyReadWithFlags(). */
 /// 通过 dictFind 方法从 redisDb 的 dict 哈希表中查找键值，如果能找到，则根据 redis 的 maxmemory_policy 策略来判断是更新 lru 的最近访问时间，还是调用 updateFU 方法更新其他指标，这些指标可以在后续内存不足时对键值进行回收。
 robj *lookupKey(redisDb *db, robj *key, int flags) {
-    dictEntry *de = dictFind(db->dict,key->ptr);
+    dictEntry *de = dictFind(db->dict,key->ptr); /// 执行dict查找对应的entry
     if (de) {
         robj *val = dictGetVal(de);
 
         /* Update the access time for the ageing algorithm.
          * Don't do it if we have a saving child, as this will trigger
-         * a copy on write madness. */
+         * a copy on write madness. */  /// key被查找过 更新LFU 或LRU
         if (server.rdb_child_pid == -1 &&
             server.aof_child_pid == -1 &&
             !(flags & LOOKUP_NOTOUCH))
@@ -148,6 +148,7 @@ robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
 
 /* Like lookupKeyReadWithFlags(), but does not use any flag, which is the
  * common case. */
+/// 查找key对应的value 比write 多了一层更新缓存命中率操作
 robj *lookupKeyRead(redisDb *db, robj *key) {
     return lookupKeyReadWithFlags(db,key,LOOKUP_NONE);
 }
@@ -157,9 +158,10 @@ robj *lookupKeyRead(redisDb *db, robj *key) {
  *
  * Returns the linked value object if the key exists or NULL if the key
  * does not exist in the specified DB. */
+/// 查询缓存对应value  1 过期否 2 查找 2.1 rehash 2.2 h[0] h[1] 2.3 存在更新过期策略值 3 存在返回value 否则返回null
 robj *lookupKeyWrite(redisDb *db, robj *key) {
-    expireIfNeeded(db,key);
-    return lookupKey(db,key,LOOKUP_NONE);
+    expireIfNeeded(db,key); /// 查找之前都先确认 如过期则根据过期策略如何删掉
+    return lookupKey(db,key,LOOKUP_NONE); /// 返回value
 }
 
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply) {

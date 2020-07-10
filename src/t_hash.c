@@ -37,6 +37,7 @@
 /* Check the length of a number of objects to see if we need to convert a
  * ziplist to a real hash. Note that we only check string encoded objects
  * as their string length can be queried in constant time. */
+/// 检查字符串类型的value的长度是否超过64 如超过 进行压缩列表转真实hash容器
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
 
@@ -44,7 +45,7 @@ void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
 
     for (i = start; i <= end; i++) {
         if (sdsEncodedObject(argv[i]) &&
-            sdslen(argv[i]->ptr) > server.hash_max_ziplist_value)
+            sdslen(argv[i]->ptr) > server.hash_max_ziplist_value) /// 仅仅对字符串进行校验
         {
             hashTypeConvert(o, OBJ_ENCODING_HT);
             break;
@@ -206,12 +207,12 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         unsigned char *zl, *fptr, *vptr;
 
         zl = o->ptr;
-        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取尾巴节点的entry 如无节点 返回null
-        if (fptr != NULL) {
-            fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1); /// 线性遍历查找有无同一个field
+        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取头节点偏移量 如无节点 返回null
+        if (fptr != NULL) { /// 存在节点
+            fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1); /// 线性遍历查找 同一个field的前一个节点
             if (fptr != NULL) { /// 该field已经被设置 执行value覆盖
                 /* Grab pointer to the value (fptr points to the field) */
-                vptr = ziplistNext(zl, fptr);
+                vptr = ziplistNext(zl, fptr); /// 根据前一个节点找到该field对应的节点  执行value替换
                 serverAssert(vptr != NULL);
                 update = 1;
 
@@ -454,9 +455,9 @@ robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
     robj *o = lookupKeyWrite(c->db,key);
     if (o == NULL) {
         o = createHashObject(); /// 创建ziplist
-        dbAdd(c->db,key,o);
+        dbAdd(c->db,key,o); /// key ziplist 键值对插入字典中
     } else {
-        if (o->type != OBJ_HASH) {
+        if (o->type != OBJ_HASH) { /// 压缩列表 与hash 的type都是 OBJ_HASH  如value类型不是OBJ_HASH  说明被别的同样的key覆盖了 响应错误（服务端不能抛异常 主线程死掉）
             addReply(c,shared.wrongtypeerr);
             return NULL;
         }
@@ -539,7 +540,7 @@ void hsetCommand(client *c) {
     }
     /// 查找key对应的value  如不存在创建并返回  如类型错误 响应异常 结束
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-    hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 是否需要对此key的value进行压缩列表到hash表转换
+    hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 根据此key 判断 是否需要进行压缩列表到hash表转换
 
     for (i = 2; i < c->argc; i += 2)
         created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 一组一组 保存 field value  field存在 执行覆盖
