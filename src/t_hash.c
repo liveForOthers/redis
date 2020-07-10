@@ -206,13 +206,13 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
-        zl = o->ptr;
-        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取头节点偏移量 如无节点 返回null
+        zl = o->ptr; /// 得到压缩链表偏移地址
+        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取头节点偏移地址 如无节点 返回null
         if (fptr != NULL) { /// 存在节点
             fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1); /// 线性遍历查找 同一个field的前一个节点
             if (fptr != NULL) { /// 该field已经被设置 执行value覆盖
                 /* Grab pointer to the value (fptr points to the field) */
-                vptr = ziplistNext(zl, fptr); /// 根据前一个节点找到该field对应的节点  执行value替换
+                vptr = ziplistNext(zl, fptr); /// 根据key节点拿下一个节点  也就是value节点 进行值替换
                 serverAssert(vptr != NULL);
                 update = 1;
 
@@ -226,8 +226,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         }
 
         if (!update) {
-            /// 该field 不存在 执行插入 插入两次 对于压缩列表 field与 value分别作为一个entry插入 只不过value有多个
-            /// todo 需要关注下压缩列表数据结构  优缺点 注意点
+            /// 该field 不存在 执行插入 插入两次 对于压缩列表 field与 value分别作为一个entry插入
             /* Push new field/value pair onto the tail of the ziplist */
             zl = ziplistPush(zl, (unsigned char*)field, sdslen(field),
                     ZIPLIST_TAIL);
@@ -237,7 +236,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         o->ptr = zl;
 
         /* Check if the ziplist needs to be converted to a hash table */
-        if (hashTypeLength(o) > server.hash_max_ziplist_entries)
+        if (hashTypeLength(o) > server.hash_max_ziplist_entries) /// 如果压缩列表元素个数超过512个 执行转hash
             hashTypeConvert(o, OBJ_ENCODING_HT);
     } else if (o->encoding == OBJ_ENCODING_HT) { /// 如果robj是 hash类型
         dictEntry *de = dictFind(o->ptr,field);

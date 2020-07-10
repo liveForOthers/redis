@@ -1135,6 +1135,7 @@ unsigned int ziplistCompare(unsigned char *p, unsigned char *sstr, unsigned int 
 
 /* Find pointer to the entry equal to the specified entry. Skip 'skip' entries
  * between every comparison. Returns NULL when the field could not be found. */
+/// 寻找节点值和 vstr 相等的列表节点，并返回该节点的指针  每次比对之前都跳过 skip 个节点。 因为对比只需要对比key无需对比value 把value的entry跳过
 unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int vlen, unsigned int skip) {
     int skipcnt = 0;
     unsigned char vencoding = 0;
