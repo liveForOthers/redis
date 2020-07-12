@@ -340,6 +340,7 @@ typedef struct zlentry {
                                     is, this points to prev-entry-len field. */ /// 指向节点起点位置的指针
 } zlentry;
 
+/// 初始化entry节点
 #define ZIPLIST_ENTRY_ZERO(zle) { \
     (zle)->prevrawlensize = (zle)->prevrawlen = 0; \
     (zle)->lensize = (zle)->len = (zle)->headersize = 0; \
@@ -349,12 +350,14 @@ typedef struct zlentry {
 
 /* Extract the encoding from the byte pointed by 'ptr' and set it into
  * 'encoding' field of the zlentry structure. */
+/// 将ptr中encoding 设置到给定encoding 中 如是非int类型 encoding仅保存前两位
 #define ZIP_ENTRY_ENCODING(ptr, encoding) do {  \
     (encoding) = (ptr[0]); \
     if ((encoding) < ZIP_STR_MASK) (encoding) &= ZIP_STR_MASK; \
 } while(0)
 
-/* Return bytes needed to store integer encoded by 'encoding'. */ /// 根据encoding 返回整数类型对应的字节数目
+/* Return bytes needed to store integer encoded by 'encoding'. */
+/// 根据encoding 返回整数类型对应的字节数目
 unsigned int zipIntSize(unsigned char encoding) {
     switch(encoding) {
     case ZIP_INT_8B:  return 1;
@@ -364,8 +367,8 @@ unsigned int zipIntSize(unsigned char encoding) {
     case ZIP_INT_64B: return 8;
     }
     if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX)
-        return 0; /* 4 bit immediate */
-    panic("Invalid integer encoding 0x%02X", encoding);
+        return 0; /* 4 bit immediate */ /// 对于 [0,12]范围内的值 value存于encoding中
+    panic("Invalid integer encoding 0x%02X", encoding); /// 非法encoding 日志
     return 0;
 }
 
