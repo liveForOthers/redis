@@ -995,7 +995,7 @@ unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int sle
 unsigned char *ziplistIndex(unsigned char *zl, int index) {
     unsigned char *p;
     unsigned int prevlensize, prevlen = 0;
-    if (index < 0) {
+    if (index < 0) { /// 为负数表示倒序遍历
         index = (-index)-1;
         p = ZIPLIST_ENTRY_TAIL(zl);
         if (p[0] != ZIP_END) {
@@ -1006,9 +1006,9 @@ unsigned char *ziplistIndex(unsigned char *zl, int index) {
             }
         }
     } else {
-        p = ZIPLIST_ENTRY_HEAD(zl);
-        while (p[0] != ZIP_END && index--) {
-            p += zipRawEntryLength(p);
+        p = ZIPLIST_ENTRY_HEAD(zl); /// 计算真正数据节点头节点偏移地址
+        while (p[0] != ZIP_END && index--) { /// 顺序向后遍历节点 直到到达尾巴表示位置 或 到达指定节点位置结束
+            p += zipRawEntryLength(p); /// 计算下一个节点偏移地址
         }
     }
     return (p[0] == ZIP_END || index > 0) ? NULL : p; /// 如该index位置元素不存在返回null 否则返回该位置元素偏移量
