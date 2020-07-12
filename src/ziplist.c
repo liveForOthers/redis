@@ -243,13 +243,14 @@
 
 /* 4 bit integer immediate encoding |1111xxxx| with xxxx between
  * 0001 and 1101. */
+/// 四位整数的掩码类型
 #define ZIP_INT_IMM_MASK 0x0f   /* Mask to extract the 4 bits value. To add
                                    one is needed to reconstruct the value. */
-#define ZIP_INT_IMM_MIN 0xf1    /* 11110001 */
-#define ZIP_INT_IMM_MAX 0xfd    /* 11111101 */
+#define ZIP_INT_IMM_MIN 0xf1    /* 11110001 */  /// 最小为1
+#define ZIP_INT_IMM_MAX 0xfd    /* 11111101 */  /// 最大为13  不在此范围的不是用4bit int编码
 
-#define INT24_MAX 0x7fffff
-#define INT24_MIN (-INT24_MAX - 1)
+#define INT24_MAX 0x7fffff /// 24位整数最大值 2^24 -1
+#define INT24_MIN (-INT24_MAX - 1) /// 24位整数最小值 -2^24
 
 /* Macro to determine if the entry is a string. String entries never start
  * with "11" as most significant bits of the first byte. */
@@ -258,32 +259,40 @@
 /* Utility macros.*/
 
 /* Return total bytes a ziplist is composed of. */
+/// 查询整个 ziplist 所占用的内存字节数 或set
 #define ZIPLIST_BYTES(zl)       (*((uint32_t*)(zl)))
 
 /* Return the offset of the last item inside the ziplist. */
+/// 查询列表尾巴节点偏移量 或set
 #define ZIPLIST_TAIL_OFFSET(zl) (*((uint32_t*)((zl)+sizeof(uint32_t))))
 
 /* Return the length of a ziplist, or UINT16_MAX if the length cannot be
  * determined without scanning the whole ziplist. */
+/// 查询列表元素个数 如过是 UINT16_MAX则需要遍历全表得到  或set
 #define ZIPLIST_LENGTH(zl)      (*((uint16_t*)((zl)+sizeof(uint32_t)*2)))
 
 /* The size of a ziplist header: two 32 bit integers for the total
  * bytes count and last item offset. One 16 bit integer for the number
  * of items field. */
+/// 查询header 大小
 #define ZIPLIST_HEADER_SIZE     (sizeof(uint32_t)*2+sizeof(uint16_t))
 
 /* Size of the "end of ziplist" entry. Just one byte. */
+/// 结束标志节点 大小
 #define ZIPLIST_END_SIZE        (sizeof(uint8_t))
 
 /* Return the pointer to the first entry of a ziplist. */
+/// 查询头数据节点偏移量
 #define ZIPLIST_ENTRY_HEAD(zl)  ((zl)+ZIPLIST_HEADER_SIZE)
 
 /* Return the pointer to the last entry of a ziplist, using the
  * last entry offset inside the ziplist header. */
+/// 查询尾巴节点偏移量
 #define ZIPLIST_ENTRY_TAIL(zl)  ((zl)+intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl)))
 
 /* Return the pointer to the last byte of a ziplist, which is, the
  * end of ziplist FF entry. */
+/// 查询结束标志节点偏移量
 #define ZIPLIST_ENTRY_END(zl)   ((zl)+intrev32ifbe(ZIPLIST_BYTES(zl))-1)
 
 /* Increment the number of items field in the ziplist header. Note that this
@@ -291,6 +300,7 @@
  * always pushed one at a time. When UINT16_MAX is reached we want the count
  * to stay there to signal that a full scan is needed to get the number of
  * items inside the ziplist. */
+/// 增加列表节点数目
 #define ZIPLIST_INCR_LENGTH(zl,incr) { \
     if (ZIPLIST_LENGTH(zl) < UINT16_MAX) \
         ZIPLIST_LENGTH(zl) = intrev16ifbe(intrev16ifbe(ZIPLIST_LENGTH(zl))+incr); \
@@ -324,7 +334,7 @@ typedef struct zlentry {
                                  /// 1110 0000 节点的值为 int64_t 类型的整数，长度为 8 字节
                                  /// 1111 0000 3字节整数
                                  /// 1111 1110 1字节整数
-                                 /// 1111 xxxx 值为 (xxxx-1)的无符号整数[0, 12] 其中xxxx范围为[1, 13] 0001 -> 1101 与 1字节整数有交叉 比1字节多了 [9, 12] 少了 0 与2字节也有交叉  待验证是否正确
+                                 /// 1111 xxxx 值为 (xxxx-1)的无符号整数[0, 12] 其中xxxx范围为[1, 13] 0001 -> 1101 由于0 被三字节占了 14被1字节占了 15 被结尾标识占了  所以 值位于[13, 15]的 需要用 1字节表示
                                  /// 1111 1111 结尾标识
     unsigned char *p;            /* Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */ /// 指向节点起点位置的指针
@@ -529,9 +539,9 @@ int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, un
          * of our encoding types that can hold this value. */
         if (value >= 0 && value <= 12) {
             *encoding = ZIP_INT_IMM_MIN+value;
-        } else if (value >= INT8_MIN && value <= INT8_MAX) {
+        } else if (value >= INT8_MIN && value <= INT8_MAX) { /// 是否可以由8bits整数表示
             *encoding = ZIP_INT_8B;
-        } else if (value >= INT16_MIN && value <= INT16_MAX) {
+        } else if (value >= INT16_MIN && value <= INT16_MAX) { /// 是否可以由16bits整数表示
             *encoding = ZIP_INT_16B;
         } else if (value >= INT24_MIN && value <= INT24_MAX) {
             *encoding = ZIP_INT_24B;
@@ -602,8 +612,8 @@ int64_t zipLoadInteger(unsigned char *p, unsigned char encoding) {
         memcpy(&i64,p,sizeof(i64));
         memrev64ifbe(&i64);
         ret = i64;
-    } else if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX) {
-        ret = (encoding & ZIP_INT_IMM_MASK)-1;
+    } else if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX) { /// 如果是四位整形类型范围的数
+        ret = (encoding & ZIP_INT_IMM_MASK)-1; /// 取后四位 再减去1 就是value
     } else {
         assert(NULL);
     }
