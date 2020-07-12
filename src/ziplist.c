@@ -219,25 +219,27 @@
 #include "endianconv.h"
 #include "redisassert.h"
 
-#define ZIP_END 255         /* Special "end of ziplist" entry. */
+#define ZIP_END 255         /* Special "end of ziplist" entry. */ /// 末端标识符
 #define ZIP_BIG_PREVLEN 254 /* Max number of bytes of the previous entry, for
                                the "prevlen" field prefixing each entry, to be
                                represented with just a single byte. Otherwise
                                it is represented as FF AA BB CC DD, where
                                AA BB CC DD are a 4 bytes unsigned integer
-                               representing the previous entry len. */
+                               representing the previous entry len. */ /// 5 字节长度标识符
 
 /* Different encoding/length possibilities */
-#define ZIP_STR_MASK 0xc0
-#define ZIP_INT_MASK 0x30
+#define ZIP_STR_MASK 0xc0 /// 字符串编码的掩码 1100  与encoding 相与后 如等于 ZIP_STR_MASK 则为integer 否则为各种类型的string
+#define ZIP_INT_MASK 0x30 /// 整数编码掩码  已经不再使用
+/// 三个字符串编码类型的宏定义
 #define ZIP_STR_06B (0 << 6)
 #define ZIP_STR_14B (1 << 6)
 #define ZIP_STR_32B (2 << 6)
-#define ZIP_INT_16B (0xc0 | 0<<4)
-#define ZIP_INT_32B (0xc0 | 1<<4)
-#define ZIP_INT_64B (0xc0 | 2<<4)
-#define ZIP_INT_24B (0xc0 | 3<<4)
-#define ZIP_INT_8B 0xfe
+/// 五个整数编码类型的宏定义
+#define ZIP_INT_16B (0xc0 | 0<<4) /// 1100 0000 表示 二字节
+#define ZIP_INT_32B (0xc0 | 1<<4) /// 1101 0000 表示 四字节
+#define ZIP_INT_64B (0xc0 | 2<<4) /// 1110 0000 表示 八字节
+#define ZIP_INT_24B (0xc0 | 3<<4) /// 1111 0000 表示 三字节
+#define ZIP_INT_8B 0xfe           /// 1111 1110 表示 一字节
 
 /* 4 bit integer immediate encoding |1111xxxx| with xxxx between
  * 0001 and 1101. */
@@ -251,7 +253,7 @@
 
 /* Macro to determine if the entry is a string. String entries never start
  * with "11" as most significant bits of the first byte. */
-#define ZIP_IS_STR(enc) (((enc) & ZIP_STR_MASK) < ZIP_STR_MASK)
+#define ZIP_IS_STR(enc) (((enc) & ZIP_STR_MASK) < ZIP_STR_MASK) /// 传入encording 返回true则是string 否则是int
 
 /* Utility macros.*/
 
@@ -322,7 +324,7 @@ typedef struct zlentry {
                                  /// 1110 0000 节点的值为 int64_t 类型的整数，长度为 8 字节
                                  /// 1111 0000 3字节整数
                                  /// 1111 1110 1字节整数
-                                 /// 1111 xxxx 值为 (xxxx-1)的无符号整数[0, 12]
+                                 /// 1111 xxxx 值为 (xxxx-1)的无符号整数[0, 12] 其中xxxx范围为[1, 13] 0001 -> 1101 与 1字节整数有交叉 比1字节多了 [9, 12] 少了 0 与2字节也有交叉  待验证是否正确
                                  /// 1111 1111 结尾标识
     unsigned char *p;            /* Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */ /// 指向节点起点位置的指针
@@ -342,7 +344,7 @@ typedef struct zlentry {
     if ((encoding) < ZIP_STR_MASK) (encoding) &= ZIP_STR_MASK; \
 } while(0)
 
-/* Return bytes needed to store integer encoded by 'encoding'. */
+/* Return bytes needed to store integer encoded by 'encoding'. */ /// 根据encoding 返回整数类型对应的字节数目
 unsigned int zipIntSize(unsigned char encoding) {
     switch(encoding) {
     case ZIP_INT_8B:  return 1;
@@ -517,11 +519,12 @@ unsigned int zipRawEntryLength(unsigned char *p) {
 
 /* Check if string pointed to by 'entry' can be encoded as an integer.
  * Stores the integer value in 'v' and its encoding in 'encoding'. */
+/// 设置当前entry的 encoding
 int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
     long long value;
 
     if (entrylen >= 32 || entrylen == 0) return 0;
-    if (string2ll((char*)entry,entrylen,&value)) {
+    if (string2ll((char*)entry,entrylen,&value)) { /// 如果string可以编码成int类型
         /* Great, the string can be encoded. Check what's the smallest
          * of our encoding types that can hold this value. */
         if (value >= 0 && value <= 12) {
@@ -544,6 +547,7 @@ int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, un
 }
 
 /* Store integer 'value' at 'p', encoded as 'encoding' */
+/// 写当前节点的 int类型value
 void zipSaveInteger(unsigned char *p, int64_t value, unsigned char encoding) {
     int16_t i16;
     int32_t i32;
@@ -574,6 +578,7 @@ void zipSaveInteger(unsigned char *p, int64_t value, unsigned char encoding) {
 }
 
 /* Read integer encoded as 'encoding' from 'p' */
+/// 读当前节点的int类型value
 int64_t zipLoadInteger(unsigned char *p, unsigned char encoding) {
     int16_t i16;
     int32_t i32;
@@ -1174,11 +1179,11 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
 
         if (skipcnt == 0) {
             /* Compare current entry with specified entry */
-            if (ZIP_IS_STR(encoding)) { /// str的比较
+            if (ZIP_IS_STR(encoding)) { /// 如此entry为 str 类型
                 if (len == vlen && memcmp(q, vstr, vlen) == 0) {
                     return p;
                 }
-            } else {
+            } else { /// 否则为int类型
                 /* Find out if the searched field can be encoded. Note that
                  * we do it only the first time, once done vencoding is set
                  * to non-zero and vll is set to the integer value. */
