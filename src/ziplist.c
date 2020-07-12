@@ -123,7 +123,7 @@
  *
  * <zlbytes> : 4bytes ziplist 占用字节总数 包括自身
  * <zltail>: 4bytes 尾巴节点在ziplist 中的偏移字节数 便于快速找到最后一个节点  从后向前遍历
- * <zllen>: 2 bytes 表示ziplist entry个数
+ * <zllen>: 2 bytes 表示ziplist entry个数, 16bits 最大值 2^16-1. 当超过最大值数目时怎么办? 定义 大于2^16-2 时 此值废弃 通过遍历所有节点计算数据个数
  * <entry>: 真实的数据
  * <zlend>: 1byte 标记ziplist结束 值固定为255
  * 意义:
@@ -136,6 +136,17 @@
  *
  * ziplist 是list(3.2之前是， 之后使用quicklist)， hash， zset (数目小于512对且 value长度不超过64时 否则转为hash)底层数据实现
  * 较少数据下  使用时间换空间。 数组比链表更省空间(更少的指针域)
+ *
+ * 1 链表存储结构
+ *   只包含少量列表项，并且每个列表项要么是小整数，要么是短字符串，那么redis会使用压缩列表作为列表键的底层实现
+ *
+ * 2 hash存储结构
+ *   哈希键只包含少量的键值对，并且每个键值对的键和值要么是小整数，要么是短字符串，那么redis会使用压缩列表作为哈希键的底层实现
+ *
+ * 为啥要求 1 节点数目 2 节点value长度？
+ * 因为每次更新时都需要进行内存重分配 + 拷贝，目标节点之后所有节点都需要copy到新value节点之后。如果 1 节点数目少 2 value长度比较小  每次内存重分配 + 拷贝成本并不高
+ *
+ * 在1 数目不多 2 value较短  能很好的达到 保证响应速度的情况下 节约内存
  *
  * The first 4 bytes represent the number 15, that is the number of bytes
  * the whole ziplist is composed of. The second 4 bytes are the offset
@@ -287,21 +298,32 @@
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
 typedef struct zlentry {
-    unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/ /// 每一个len所占bytes个数
+    unsigned int prevrawlensize; /* Bytes used to encode the previous entry len*/ /// 编码 prevrawlen 所需字节大小
+    /// 如何编码前置节点长度? 答案: 前置节点长度小于2^8-2，使用1 byte保存此长度值。 如大于等于2^8-2，使用5 bytes保存此长度值， 其中第一个byte设置为2^8-2 标识5 bytes字节长度，其余4 bytes 用于保存实际长度
     unsigned int prevrawlen;     /* Previous entry len. */ /// 记录前一个entry的长度  因为顺序写 知道了当前entry的首地址 再减去前一个entry长度就拿到了前一个entry的首地址 反向遍历
     unsigned int lensize;        /* Bytes used to encode this entry type/len.
                                     For example strings have a 1, 2 or 5 bytes
-                                    header. Integers always use a single byte.*/ /// 每一个len的长度 如string 每一个len可以为1, 2, 5 个bytes integer只有单bytes
+                                    header. Integers always use a single byte.*/ /// 编码 len 所需字节大小， 如string 每一个len可以为1, 2, 5 个bytes integer只有单bytes
     unsigned int len;            /* Bytes used to represent the actual entry.
                                     For strings this is just the string length
                                     while for integers it is 1, 2, 3, 4, 8 or
                                     0 (for 4 bit immediate) depending on the
                                     number range. */ /// 当前节点数据项实际长度
-    unsigned int headersize;     /* prevrawlensize + lensize. */
+    unsigned int headersize;     /* prevrawlensize + lensize. */  /// 当前节点header大小
     unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
                                     the entry encoding. However for 4 bits
                                     immediate integers this can assume a range
-                                    of values and must be range-checked. */ /// 编码类型 每个zlentry 有自己的独立编码类型 节省内存 可以是integer或string， 当为string时， 前2bits (00，01，10) 分别代表了string类型 其他bit表示string长度 当是int时。前2 bits为11 其他位为值
+                                    of values and must be range-checked. */
+                                 /// 编码类型 每个zlentry 有自己的独立编码类型 节省内存 可以是integer或string，
+                                 /// 当为string时， 前2bits (00，01，10) 分别代表了string类型 其他bit表示string长度
+                                 /// 当是int时。前2 bits为11，for example:
+                                 /// 1100 0000 节点的值为 int16_t 类型的整数，长度为 2 字节
+                                 /// 1101 0000 节点的值为 int32_t 类型的整数，长度为 4 字节。
+                                 /// 1110 0000 节点的值为 int64_t 类型的整数，长度为 8 字节
+                                 /// 1111 0000 3字节整数
+                                 /// 1111 1110 1字节整数
+                                 /// 1111 xxxx 值为 (xxxx-1)的无符号整数[0, 12]
+                                 /// 1111 1111 结尾标识
     unsigned char *p;            /* Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */ /// 指向节点起点位置的指针
 } zlentry;
@@ -1135,23 +1157,24 @@ unsigned int ziplistCompare(unsigned char *p, unsigned char *sstr, unsigned int 
 
 /* Find pointer to the entry equal to the specified entry. Skip 'skip' entries
  * between every comparison. Returns NULL when the field could not be found. */
+/// p 是真实数据头结点偏移地址
 /// 寻找节点值和 vstr 相等的列表节点，并返回该节点的指针  每次比对之前都跳过 skip 个节点。 因为对比只需要对比key无需对比value 把value的entry跳过
 unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int vlen, unsigned int skip) {
     int skipcnt = 0;
     unsigned char vencoding = 0;
     long long vll = 0;
 
-    while (p[0] != ZIP_END) {
+    while (p[0] != ZIP_END) { /// 还未遍历完毕
         unsigned int prevlensize, encoding, lensize, len;
         unsigned char *q;
 
         ZIP_DECODE_PREVLENSIZE(p, prevlensize);
         ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len);
-        q = p + prevlensize + lensize;
+        q = p + prevlensize + lensize; /// 计算出下一个节点的偏移地址 头结点不做比较
 
         if (skipcnt == 0) {
             /* Compare current entry with specified entry */
-            if (ZIP_IS_STR(encoding)) {
+            if (ZIP_IS_STR(encoding)) { /// str的比较
                 if (len == vlen && memcmp(q, vstr, vlen) == 0) {
                     return p;
                 }
@@ -1159,6 +1182,7 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
                 /* Find out if the searched field can be encoded. Note that
                  * we do it only the first time, once done vencoding is set
                  * to non-zero and vll is set to the integer value. */
+                /// 如已经经过编码了 需要执行解码操作
                 if (vencoding == 0) {
                     if (!zipTryEncoding(vstr, vlen, &vll, &vencoding)) {
                         /* If the entry can't be encoded we set it to
@@ -1173,7 +1197,7 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
                 /* Compare current entry with specified entry, do it only
                  * if vencoding != UCHAR_MAX because if there is no encoding
                  * possible for the field it can't be a valid integer. */
-                if (vencoding != UCHAR_MAX) {
+                if (vencoding != UCHAR_MAX) { /// 整数值对比
                     long long ll = zipLoadInteger(q, encoding);
                     if (ll == vll) {
                         return p;
@@ -1182,7 +1206,7 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
             }
 
             /* Reset skip count */
-            skipcnt = skip;
+            skipcnt = skip; /// 每次重新设置skip
         } else {
             /* Skip entry */
             skipcnt--;
@@ -1192,7 +1216,7 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
         p = q + len;
     }
 
-    return NULL;
+    return NULL; /// 无匹配节点返回null
 }
 
 /* Return length of ziplist. */

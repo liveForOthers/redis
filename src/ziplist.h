@@ -30,10 +30,11 @@
 
 #ifndef _ZIPLIST_H
 #define _ZIPLIST_H
-
+/// 宏定义
 #define ZIPLIST_HEAD 0
 #define ZIPLIST_TAIL 1
 
+/// 定义了操作压缩列表的接口
 unsigned char *ziplistNew(void);
 unsigned char *ziplistMerge(unsigned char **first, unsigned char **second);
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where);
