@@ -242,7 +242,7 @@ robj *createIntsetObject(void) {
 
 robj *createHashObject(void) {
     unsigned char *zl = ziplistNew();
-    robj *o = createObject(OBJ_HASH, zl);
+    robj *o = createObject(OBJ_HASH, zl); /// 将压缩列表指针包装成redis对象 用于存入字典中
     o->encoding = OBJ_ENCODING_ZIPLIST; /// 设置编码
     return o;
 }

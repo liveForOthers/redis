@@ -206,8 +206,8 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
-        zl = o->ptr; /// 得到压缩链表偏移地址
-        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取头节点偏移地址 如无节点 返回null
+        zl = o->ptr; /// 得到压缩链表指针
+        fptr = ziplistIndex(zl, ZIPLIST_HEAD); /// 获取头节点指针 如无节点 返回null
         if (fptr != NULL) { /// 存在节点
             fptr = ziplistFind(fptr, (unsigned char*)field, sdslen(field), 1); /// 线性遍历查找 同一个field的前一个节点
             if (fptr != NULL) { /// 该field已经被设置 执行value覆盖
@@ -537,10 +537,11 @@ void hsetCommand(client *c) {
         addReplyError(c,"wrong number of arguments for HMSET");
         return;
     }
-    /// 查找key对应的value  如不存在创建并返回  如类型错误 响应异常 结束
+    /// 查找key对应的value  如不存在创建并返回  如类型错误(用户原因导致 set与其他存储类型key相同了) 响应异常 结束
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-    hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 根据此key 判断 是否需要进行压缩列表到hash表转换
+    hashTypeTryConversion(o,c->argv,2,c->argc-1); /// 根据此key 判断 是否需要进行压缩列表到hash表转换  此处判断是校验是否为长value
 
+    /// 遍历参数 一对一对插入到hash中
     for (i = 2; i < c->argc; i += 2)
         created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 一组一组 保存 field value  field存在 执行覆盖
 

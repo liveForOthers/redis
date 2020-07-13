@@ -423,6 +423,7 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
  * The 'encoding' variable will hold the entry encoding, the 'lensize'
  * variable will hold the number of bytes required to encode the entry
  * length, and the 'len' variable will hold the entry length. */
+/// 解码ptr所指向的entry 并存储于入参变量地址中 len: 节点数据长度 lensize: 编码节点长度所需字节数目 encoding: 节点值编码类型  除了encoding 其他量是懒解码的?
 #define ZIP_DECODE_LENGTH(ptr, encoding, lensize, len) do {                    \
     ZIP_ENTRY_ENCODING((ptr), (encoding));                                     \
     if ((encoding) < ZIP_STR_MASK) {                                           \
@@ -525,9 +526,9 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
 /* Return the total number of bytes used by the entry pointed to by 'p'. */
 unsigned int zipRawEntryLength(unsigned char *p) {
     unsigned int prevlensize, encoding, lensize, len;
-    ZIP_DECODE_PREVLENSIZE(p, prevlensize);
-    ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len);
-    return prevlensize + lensize + len;
+    ZIP_DECODE_PREVLENSIZE(p, prevlensize); /// 计算prevlensize所占字节数目 1 or 5
+    ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len); /// 解码出 lensize len
+    return prevlensize + lensize + len; /// todo 为啥encoding prevlen len未占用空间?
 }
 
 /* Check if string pointed to by 'entry' can be encoded as an integer.
@@ -1046,7 +1047,7 @@ unsigned char *ziplistIndex(unsigned char *zl, int index) {
             }
         }
     } else {
-        p = ZIPLIST_ENTRY_HEAD(zl); /// 计算真正数据节点头节点偏移地址
+        p = ZIPLIST_ENTRY_HEAD(zl); /// 计算真正数据节点头节点指针
         while (p[0] != ZIP_END && index--) { /// 顺序向后遍历节点 直到到达尾巴表示位置 或 到达指定节点位置结束
             p += zipRawEntryLength(p); /// 计算下一个节点偏移地址
         }
