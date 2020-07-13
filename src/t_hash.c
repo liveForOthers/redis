@@ -533,7 +533,7 @@ void hsetCommand(client *c) {
     int i, created = 0;
     robj *o;
 
-    if ((c->argc % 2) == 1) {
+    if ((c->argc % 2) == 1) { /// hset key field1 value1 field2 value2.... 参数仅支持偶数个  基数直接抛出异常
         addReplyError(c,"wrong number of arguments for HMSET");
         return;
     }

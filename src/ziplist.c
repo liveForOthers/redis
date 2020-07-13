@@ -634,13 +634,13 @@ void zipEntry(unsigned char *p, zlentry *e) {
 
 /* Create a new empty ziplist. */
 unsigned char *ziplistNew(void) {
-    unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE;
+    unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE; /// 初始分配空间为header+end  思考后续加入数据后怎么保证空间能连续扩张?
     unsigned char *zl = zmalloc(bytes);
-    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes); /// 设置当前ziplist总长度的，包括头部长度以及entry的总长度，也就是 4+4+2+1bytes
-    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE); /// 设置最后一个entry偏移量，也就是last item offset所保存的值 4+4+2bytes
-    ZIPLIST_LENGTH(zl) = 0; /// 设置压缩列表实际元素数目 空列表设置为0
+    ZIPLIST_BYTES(zl) = intrev32ifbe(bytes); /// 设置当前ziplist占用的字节数目，初始化时仅包括头部以及尾巴标识，也就是 4+4+2+1bytes, 后续加入节点或节点变更时会随时变更此属性?
+    ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE); /// 设置最后一个entry偏移量，也就是last item offset所保存的值 4+4+2bytes  后续每新加入删除entry也需要增加删除此属性?
+    ZIPLIST_LENGTH(zl) = 0; /// 设置压缩列表实际元素数目 空列表设置为0  后续每增删entry需要变更此属性
     zl[bytes-1] = ZIP_END; /// 链表尾巴赋值
-    return zl;
+    return zl; /// 返回压缩列表指针
 }
 
 /* Resize the ziplist. */
