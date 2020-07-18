@@ -419,9 +419,9 @@ long long dbTotalServerKeyCount() {
  *
  * Every time a DB is flushed the function signalFlushDb() is called.
  *----------------------------------------------------------------------------*/
-
+/// 每次更新一个key时  钩子函数被调用 进行变更命令传播 通知监视这个键的客户端
 void signalModifiedKey(redisDb *db, robj *key) {
-    touchWatchedKey(db,key);
+    touchWatchedKey(db,key); /// 把监听此key的Client列表进行设置，只能让一个客户端操作执行成功，客户端的其他操作无效，达到同步 仅用于lua事物 todo???
     trackingInvalidateKey(key);
 }
 

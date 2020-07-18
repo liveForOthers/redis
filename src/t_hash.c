@@ -546,6 +546,7 @@ void hsetCommand(client *c) {
         created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY); /// 一组一组 保存 field value  field存在 执行覆盖
 
     /* HMSET (deprecated) and HSET return value is different. */
+    /// 对于HSET 与HMSET  返回不同响应内容
     char *cmdname = c->argv[0]->ptr;
     if (cmdname[1] == 's' || cmdname[1] == 'S') {
         /* HSET */
@@ -554,9 +555,9 @@ void hsetCommand(client *c) {
         /* HMSET */
         addReply(c, shared.ok);
     }
-    signalModifiedKey(c->db,c->argv[1]);
-    notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
-    server.dirty++;
+    signalModifiedKey(c->db,c->argv[1]); /// 每次key变更调用钩子函数执行变更命令传播
+    notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id); /// 通知
+    server.dirty++; /// 脏数据++  todo 未刷新到AOF？
 }
 
 void hincrbyCommand(client *c) {
