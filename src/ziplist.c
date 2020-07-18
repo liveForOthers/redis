@@ -526,6 +526,7 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
 /* Return the total number of bytes used by the entry pointed to by 'p'. */
 unsigned int zipRawEntryLength(unsigned char *p) {
     unsigned int prevlensize, encoding, lensize, len;
+    /// 节点由三部分组成, 存储前一个节点长度所占空间、encoding、content
     ZIP_DECODE_PREVLENSIZE(p, prevlensize); /// 计算prevlensize所占字节数目 1 or 5
     ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len); /// 解码出 lensize len
     return prevlensize + lensize + len; /// todo 为啥encoding prevlen len未占用空间?
@@ -533,11 +534,11 @@ unsigned int zipRawEntryLength(unsigned char *p) {
 
 /* Check if string pointed to by 'entry' can be encoded as an integer.
  * Stores the integer value in 'v' and its encoding in 'encoding'. */
-/// 设置当前entry的 encoding
+/// 检查是否未int 设置当前entry的 encoding
 int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
     long long value;
 
-    if (entrylen >= 32 || entrylen == 0) return 0;
+    if (entrylen >= 32 || entrylen == 0) return 0; /// 数据字节数目为0 或大于等于32 返回不可解码
     if (string2ll((char*)entry,entrylen,&value)) { /// 如果string可以编码成int类型
         /* Great, the string can be encoded. Check what's the smallest
          * of our encoding types that can hold this value. */
@@ -672,7 +673,29 @@ unsigned char *ziplistResize(unsigned char *zl, unsigned int len) {
  *
  * The pointer "p" points to the first entry that does NOT need to be
  * updated, i.e. consecutive fields MAY need an update. */
-// TODO 芋艿：细读
+/*
+ * 连锁更新
+ *
+ * 当将一个新节点添加到某个节点之前的时候，
+ * 如果原节点的 header 空间不足以保存新节点的长度，
+ * 那么就需要对原节点的 header 空间进行扩展（从 1 字节扩展到 5 字节）。
+ *
+ * 但是，当对原节点进行扩展之后，原节点的下一个节点的 prevlen 可能出现空间不足，
+ * 这种情况在多个连续节点的长度都接近 ZIP_BIGLEN 时可能发生。
+ *
+ * 这个函数就用于检查并修复后续节点的空间问题。
+ *
+ * 反过来说，
+ * 因为节点的长度变小而引起的连续缩小也是可能出现的，
+ * 不过，为了避免扩展-缩小-扩展-缩小这样的情况反复出现（flapping，抖动），
+ * 我们不处理这种情况，而是任由 prevlen 比所需的长度更长。
+ *
+ * 注意，程序的检查是针对 p 的后续节点，而不是 p 所指向的节点。
+ * 因为节点 p 在传入之前已经完成了所需的空间扩展工作。
+ *
+ * T = O(N^2)
+ */
+/// todo 细读
 unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     size_t curlen = intrev32ifbe(ZIPLIST_BYTES(zl)), rawlen, rawlensize;
     size_t offset, noffset, extra;
@@ -749,29 +772,32 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
     int nextdiff = 0;
     zlentry first, tail;
 
-    zipEntry(p, &first);
+    zipEntry(p, &first); /// 将p深拷贝到first中
+    /// 将p指针指向后面不删除的节点头部  并记录删除数目
     for (i = 0; p[0] != ZIP_END && i < num; i++) {
         p += zipRawEntryLength(p);
         deleted++;
     }
-
+    /// 计算出删除的总字节数目
     totlen = p-first.p; /* Bytes taken by the element(s) to delete. */
     if (totlen > 0) {
-        if (p[0] != ZIP_END) {
+        if (p[0] != ZIP_END) { /// 删除的节点不是后面的所有节点需要进行内存拷贝
             /* Storing `prevrawlen` in this entry may increase or decrease the
              * number of bytes required compare to the current `prevrawlen`.
              * There always is room to store this, because it was previously
              * stored by an entry that is now being deleted. */
+            /// 位于被删除范围之后的第一个节点的 header 部分的大小可能容纳不了新的前置节点，所以需要计算新旧前置节点之间的字节数差
             nextdiff = zipPrevLenByteDiff(p,first.prevrawlen);
 
             /* Note that there is always space when p jumps backward: if
              * the new previous entry is large, one of the deleted elements
              * had a 5 bytes prevlen header, so there is for sure at least
              * 5 bytes free and we need just 4. */
-            p -= nextdiff;
-            zipStorePrevEntryLength(p,first.prevrawlen);
+            p -= nextdiff; /// 指针 p 后退 nextdiff 字节，为新 header 空出空间
+            zipStorePrevEntryLength(p,first.prevrawlen); /// 更新后置节点的prevrawlen
 
             /* Update offset for tail */
+            /// 更新到达表尾的偏移量
             ZIPLIST_TAIL_OFFSET(zl) =
                 intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))-totlen);
 
@@ -779,28 +805,33 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
              * "nextdiff" in account as well. Otherwise, a change in the
              * size of prevlen doesn't have an effect on the *tail* offset. */
             zipEntry(p, &tail);
-            if (p[tail.headersize+tail.len] != ZIP_END) {
+            if (p[tail.headersize+tail.len] != ZIP_END) { /// 删除后有有效节点
+                /// 将 nextdiff 记录的字节数也计算到表尾偏移量中
                 ZIPLIST_TAIL_OFFSET(zl) =
                    intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+nextdiff);
             }
 
             /* Move tail to the front of the ziplist */
+            /// 表尾向表头移动数据，覆盖被删除节点的数据
             memmove(first.p,p,
                 intrev32ifbe(ZIPLIST_BYTES(zl))-(p-zl)-1);
         } else {
             /* The entire tail was deleted. No need to move memory. */
+            /// 后面节点都被删除了，更新end节点偏移量 无需进行内存拷贝
             ZIPLIST_TAIL_OFFSET(zl) =
                 intrev32ifbe((first.p-zl)-first.prevrawlen);
         }
 
         /* Resize and update length */
         offset = first.p-zl;
-        zl = ziplistResize(zl, intrev32ifbe(ZIPLIST_BYTES(zl))-totlen+nextdiff);
-        ZIPLIST_INCR_LENGTH(zl,-deleted);
+        zl = ziplistResize(zl, intrev32ifbe(ZIPLIST_BYTES(zl))-totlen+nextdiff); /// 缩小内存并设置end节点
+        ZIPLIST_INCR_LENGTH(zl,-deleted); /// 更新节点数目
         p = zl+offset;
 
         /* When nextdiff != 0, the raw length of the next entry has changed, so
          * we need to cascade the update throughout the ziplist */
+        /// 如果 p 所指向的节点的大小已经变更，那么进行级联更新
+        /// 检查 p 之后的所有节点是否符合 ziplist 的编码要求
         if (nextdiff != 0)
             zl = __ziplistCascadeUpdate(zl,p);
     }
@@ -821,7 +852,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
 
     /* Find out prevlen for the entry that is inserted. */
     /// 找出待插入节点的prevlen
-    if (p[0] != ZIP_END) { /// p为头部节点  说明期望插入头部位置
+    if (p[0] != ZIP_END) {
         ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
     } else { /// 期望插入尾巴位置
         unsigned char *ptail = ZIPLIST_ENTRY_TAIL(zl);
@@ -831,36 +862,40 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     }
 
     /* See if the entry can be encoded */
-    if (zipTryEncoding(s,slen,&value,&encoding)) {
+    if (zipTryEncoding(s,slen,&value,&encoding)) { /// 先尝试编码成int
         /* 'encoding' is set to the appropriate integer encoding */
-        reqlen = zipIntSize(encoding);
+        reqlen = zipIntSize(encoding); /// 数据字节数目
     } else {
         /* 'encoding' is untouched, however zipStoreEntryEncoding will use the
          * string length to figure out how to encode it. */
-        reqlen = slen;
+        reqlen = slen; /// 不能编码长度为字符串字节数目
     }
     /* We need space for both the length of the previous entry and
      * the length of the payload. */
-    reqlen += zipStorePrevEntryLength(NULL,prevlen);
-    reqlen += zipStoreEntryEncoding(NULL,encoding,slen);
+    reqlen += zipStorePrevEntryLength(NULL,prevlen); /// 字节数目加上prevlen
+    reqlen += zipStoreEntryEncoding(NULL,encoding,slen); /// 字节数目加上encoding
 
     /* When the insert position is not equal to the tail, we need to
      * make sure that the next entry can hold this entry's length in
      * its prevlen field. */
     int forcelarge = 0;
-    nextdiff = (p[0] != ZIP_END) ? zipPrevLenByteDiff(p,reqlen) : 0;
-    if (nextdiff == -4 && reqlen < 4) {
+    nextdiff = (p[0] != ZIP_END) ? zipPrevLenByteDiff(p,reqlen) : 0; /// 求后面节点的prevlensize所分配字节数目与新节点字节数目差 如为正数则需要扩展header字节空间
+    if (nextdiff == -4 && reqlen < 4) { /// 如原header比待插入节点多4字节 且 原节点字节数目小于4 则清零不额外处理
         nextdiff = 0;
         forcelarge = 1;
     }
 
     /* Store offset because a realloc may change the address of zl. */
+    /// 重分配空间可能会改变 zl 的地址, 在分配之前，需要记录 zl 到 p 的偏移量，然后在分配之后依靠偏移量还原 p
     offset = p-zl;
-    zl = ziplistResize(zl,curlen+reqlen+nextdiff);
-    p = zl+offset;
+    /// curlen 是 ziplist 原来的长度
+    /// reqlen 是整个新节点的长度
+    /// nextdiff 是新节点的后继节点扩展 header 的长度（要么 0 字节，要么 4 个字节）
+    zl = ziplistResize(zl,curlen+reqlen+nextdiff); /// ziplist 空间重分配
+    p = zl+offset; /// 更新p指针
 
     /* Apply memory move when necessary and update tail offset. */
-    if (p[0] != ZIP_END) {
+    if (p[0] != ZIP_END) { /// 非尾巴插入 需要执行内存拷贝  并更新尾巴偏移量
         /* Subtract one because of the ZIP_END bytes */
         memmove(p+reqlen,p-nextdiff,curlen-offset-1+nextdiff);
 
@@ -884,26 +919,26 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         }
     } else {
         /* This element will be the new tail. */
-        ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(p-zl);
+        ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(p-zl); /// 尾插 新元素是新的尾巴节点
     }
 
     /* When nextdiff != 0, the raw length of the next entry has changed, so
      * we need to cascade the update throughout the ziplist */
-    if (nextdiff != 0) {
+    if (nextdiff != 0) { /// 如后面节点header需要扩容 级联检查更新后面节点的header空间
         offset = p-zl;
         zl = __ziplistCascadeUpdate(zl,p+reqlen);
         p = zl+offset;
     }
 
     /* Write the entry */
-    p += zipStorePrevEntryLength(p,prevlen);
-    p += zipStoreEntryEncoding(p,encoding,slen);
+    p += zipStorePrevEntryLength(p,prevlen); /// 更新新加入节点的 prevlen
+    p += zipStoreEntryEncoding(p,encoding,slen); /// 更新新加入节点的encoding
     if (ZIP_IS_STR(encoding)) {
-        memcpy(p,s,slen);
+        memcpy(p,s,slen); /// 将串s拷贝到当前节点中
     } else {
-        zipSaveInteger(p,value,encoding);
+        zipSaveInteger(p,value,encoding); /// 将value存进节点中
     }
-    ZIPLIST_INCR_LENGTH(zl,1);
+    ZIPLIST_INCR_LENGTH(zl,1); /// 增加链表节点数目
     return zl;
 }
 
@@ -1130,14 +1165,14 @@ unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char 
  * Also update *p in place, to be able to iterate over the
  * ziplist, while deleting entries. */
 unsigned char *ziplistDelete(unsigned char *zl, unsigned char **p) {
-    size_t offset = *p-zl;
-    zl = __ziplistDelete(zl,*p,1);
+    size_t offset = *p-zl; /// 计算出待删除节点距列表头部偏移量
+    zl = __ziplistDelete(zl,*p,1); /// 执行删除
 
     /* Store pointer to current element in p, because ziplistDelete will
      * do a realloc which might result in a different "zl"-pointer.
      * When the delete direction is back to front, we might delete the last
      * entry and end up with "p" pointing to ZIP_END, so check this. */
-    *p = zl+offset;
+    *p = zl+offset; /// 计算出新的原删除节点指针
     return zl;
 }
 
@@ -1189,25 +1224,25 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
 
         ZIP_DECODE_PREVLENSIZE(p, prevlensize);
         ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len);
-        q = p + prevlensize + lensize; /// 计算出下一个节点的偏移地址 头结点不做比较
-
+        q = p + prevlensize + lensize; /// 拿到当前节点数据指针
+        /// 当前节点不跳过
         if (skipcnt == 0) {
             /* Compare current entry with specified entry */
             if (ZIP_IS_STR(encoding)) { /// 如此entry为 str 类型
-                if (len == vlen && memcmp(q, vstr, vlen) == 0) {
+                if (len == vlen && memcmp(q, vstr, vlen) == 0) { /// 字符串是与数据指针比较
                     return p;
                 }
             } else { /// 否则为int类型
                 /* Find out if the searched field can be encoded. Note that
                  * we do it only the first time, once done vencoding is set
                  * to non-zero and vll is set to the integer value. */
-                /// 如已经经过编码了 需要执行解码操作
+                /// 如已经经过编码了 需要执行解码操作 此操作只会执行一次 执行后 vencoding不为0
                 if (vencoding == 0) {
-                    if (!zipTryEncoding(vstr, vlen, &vll, &vencoding)) {
+                    if (!zipTryEncoding(vstr, vlen, &vll, &vencoding)) { /// 尝试解码给定key成整数 成功返回1
                         /* If the entry can't be encoded we set it to
                          * UCHAR_MAX so that we don't retry again the next
                          * time. */
-                        vencoding = UCHAR_MAX;
+                        vencoding = UCHAR_MAX; /// 解码失败标识
                     }
                     /* Must be non-zero by now */
                     assert(vencoding);
@@ -1232,7 +1267,7 @@ unsigned char *ziplistFind(unsigned char *p, unsigned char *vstr, unsigned int v
         }
 
         /* Move to next entry */
-        p = q + len;
+        p = q + len; /// 指针偏移到下一个entry头部
     }
 
     return NULL; /// 无匹配节点返回null

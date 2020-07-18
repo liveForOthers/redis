@@ -217,7 +217,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
                 update = 1;
 
                 /* Delete value */
-                zl = ziplistDelete(zl, &vptr); /// 删除旧value
+                zl = ziplistDelete(zl, &vptr); /// 删除旧value 返回链表头指针
 
                 /* Insert new value */ /// 插入新的value
                 zl = ziplistInsert(zl, vptr, (unsigned char*)value,
@@ -226,14 +226,14 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         }
 
         if (!update) {
-            /// 该field 不存在 执行插入 插入两次 对于压缩列表 field与 value分别作为一个entry插入
+            /// 该field 不存在 执行尾插 插入两次 对于压缩列表 field与 value分别作为一个entry插入
             /* Push new field/value pair onto the tail of the ziplist */
             zl = ziplistPush(zl, (unsigned char*)field, sdslen(field),
                     ZIPLIST_TAIL);
             zl = ziplistPush(zl, (unsigned char*)value, sdslen(value),
                     ZIPLIST_TAIL);
         }
-        o->ptr = zl;
+        o->ptr = zl; /// 更新压缩列表指针
 
         /* Check if the ziplist needs to be converted to a hash table */
         if (hashTypeLength(o) > server.hash_max_ziplist_entries) /// 如果压缩列表元素个数超过512个 执行转hash
