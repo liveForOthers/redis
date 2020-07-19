@@ -4863,7 +4863,7 @@ int main(int argc, char **argv) {
     char hashseed[16];
     getRandomHexChars(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed((uint8_t*)hashseed);
-    server.sentinel_mode = checkForSentinelMode(argc,argv);
+    server.sentinel_mode = checkForSentinelMode(argc,argv); /// 根据参数判定当前节点是否是否是sentinel 模式启动
     // 设置服务器的初始化配置
     initServerConfig();
     ACLInit(); /* The ACL subsystem must be initialized ASAP because the
