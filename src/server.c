@@ -4852,7 +4852,7 @@ int main(int argc, char **argv) {
 
     /* We need to initialize our libraries, and the server configuration. */
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
-    spt_init(argc, argv);
+    spt_init(argc, argv); /// 在macOS, Linux下设置(修改)redis的各个进程名, 例如redis-aof-rewrite、redis-rdb-bgsave等。
 #endif
     setlocale(LC_COLLATE,"");  /// todo why 更改字符编码
     tzset(); /* Populates 'timezone' global. */
