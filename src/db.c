@@ -1167,6 +1167,7 @@ void propagateExpire(redisDb *db, robj *key, int lazy) {
 }
 
 /* Check if the key is expired. */
+/// key未过期返回0  否则返回1
 int keyIsExpired(redisDb *db, robj *key) {
     mstime_t when = getExpire(db,key);
 
